@@ -16,6 +16,7 @@
     "@modelcontextprotocol/sdk": "^1.8.0",
     "axios": "^1.8.4",
     "dotenv": "^16.4.7",
+    "open": "^9.1.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {
