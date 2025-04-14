@@ -36,6 +36,11 @@ export interface CreateTuneParams {
     preset?: string;
     callback?: string;
     characteristics?: Record<string, string>;
+    /**
+     * Optional branch parameter. Use 'fast' for mock testing without incurring charges.
+     * Enum: 'sd15', 'sdxl1', 'fast'
+     */
+    branch?: 'sd15' | 'sdxl1' | 'fast';
 }
 
 // Image generation prompt parameters

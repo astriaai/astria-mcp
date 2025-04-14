@@ -42,7 +42,50 @@ export class AstriaApiClient {
     // Creates a new tune
     async createTune(tuneData: CreateTuneParams): Promise<TuneInfo> {
         try {
-            const response = await this.axiosInstance.post('/tunes', tuneData);
+            // Create FormData for the request
+            const FormData = require('form-data');
+            const formData = new FormData();
+
+            // Add the tune parameters
+            formData.append('tune[title]', tuneData.title);
+            formData.append('tune[name]', tuneData.name);
+
+            // Add optional preset if provided
+            if (tuneData.preset) {
+                formData.append('tune[preset]', tuneData.preset);
+            }
+
+            // Add optional characteristics if provided
+            if (tuneData.characteristics) {
+                for (const [key, value] of Object.entries(tuneData.characteristics)) {
+                    formData.append(`tune[characteristics][${key}]`, value);
+                }
+            }
+
+            // Add optional callback if provided
+            if (tuneData.callback) {
+                formData.append('tune[callback]', tuneData.callback);
+            }
+
+            // Add optional branch if provided (use 'fast' for mock testing)
+            if (tuneData.branch) {
+                formData.append('tune[branch]', tuneData.branch);
+            }
+
+            // Add the image URLs
+            if (tuneData.image_urls && tuneData.image_urls.length > 0) {
+                for (const url of tuneData.image_urls) {
+                    formData.append('tune[image_urls][]', url);
+                }
+            }
+
+            // Make the API request with FormData
+            const response = await this.axiosInstance.post('/tunes', formData, {
+                headers: {
+                    ...formData.getHeaders()
+                }
+            });
+
             return response.data;
         } catch (error: any) {
             const astriaError = createErrorFromResponse(error);

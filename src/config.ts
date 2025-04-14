@@ -30,5 +30,10 @@ export const VALIDATION_CONFIG = {
 export const FEATURE_FLAGS = {
   OPEN_IMAGES_IN_BROWSER: true,
   DISPLAY_IMAGES_IN_CHAT: true,
-  ENABLE_ERROR_LOGGING: false
+  ENABLE_ERROR_LOGGING: true,
+  /**
+   * When enabled, all fine-tune requests will use 'fast' branch for mock testing
+   * This allows testing the API integration without incurring charges
+   */
+  ENABLE_TEST_MODE: process.env.ASTRIA_TEST_MODE === 'true' || false
 };

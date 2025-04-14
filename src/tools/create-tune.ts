@@ -15,6 +15,8 @@ export const CreateTuneRawSchema = {
         .default("flux-lora-portrait").describe("Optional Flux training preset."),
     characteristics: z.record(z.string()).optional()
         .describe("Optional key-value pairs for prompt templating (e.g., {\"eye_color\": \"blue eyes\"})."),
+    branch: z.enum(['sd15', 'sdxl1', 'fast']).optional()
+        .describe("Optional branch parameter. Use 'fast' for mock testing without incurring charges."),
 };
 
 export const CreateTuneSchema = z.object(CreateTuneRawSchema);
@@ -35,8 +37,15 @@ export async function handleCreateTune(params: any): Promise<any> {
             image_urls: parsedParams.image_urls,
             callback: parsedParams.callback,
             preset: parsedParams.preset,
-            characteristics: parsedParams.characteristics
+            characteristics: parsedParams.characteristics,
+            // If test mode is enabled or branch is explicitly set, use that branch
+            branch: FEATURE_FLAGS.ENABLE_TEST_MODE ? 'fast' : parsedParams.branch
         };
+
+        // Log if we're using test mode
+        if (FEATURE_FLAGS.ENABLE_TEST_MODE && FEATURE_FLAGS.ENABLE_ERROR_LOGGING) {
+            console.error(`MCP Test Mode: Using 'fast' branch for mock testing without incurring charges`);
+        }
 
         // Create the tune
         const result = await astriaApi.createTune(tuneData);
