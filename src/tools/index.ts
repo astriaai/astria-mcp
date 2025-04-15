@@ -1,6 +1,4 @@
-/**
- * Tool module exports
- */
+// Tool module exports
 
 export * from './generate-image';
 export * from './create-tune';

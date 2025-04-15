@@ -11,8 +11,6 @@ export class AstriaError extends Error {
     ) {
         super(message);
         this.name = 'AstriaError';
-
-        // This is needed to make instanceof work correctly with TypeScript
         Object.setPrototypeOf(this, AstriaError.prototype);
     }
 

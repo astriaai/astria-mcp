@@ -1,5 +1,3 @@
-/**
- * Utility module exports
- */
+// Utility module exports
 
 export * from './helpers';

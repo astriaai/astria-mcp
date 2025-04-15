@@ -1,11 +1,8 @@
-/**
- * Prompt resource implementation
- */
-
 import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 import { astriaApi } from '../api/client';
-import { parseId } from '../utils/helpers';
+import { parseId, fetchImageAsBase64 } from '../utils/helpers';
+import { FEATURES } from '../config';
 
 // Resource template for retrieving a specific prompt
 export const PromptResourceTemplate = new ResourceTemplate("astria://tune/{tune_id}/prompt/{prompt_id}", {
@@ -31,7 +28,9 @@ export async function handlePromptResource(uri: URL, params: Record<string, unkn
         // Parse and validate both IDs from the URI template parameters
         tuneId = parseId(params.tune_id, 'tune_id');
         promptId = parseId(params.prompt_id, 'prompt_id');
-        console.error(`MCP Resource Read: astria_prompt with tune_id=${tuneId}, prompt_id=${promptId}`);
+        if (FEATURES.LOG_ERRORS) {
+            console.error(`MCP Resource Read: astria_prompt with tune_id=${tuneId}, prompt_id=${promptId}`);
+        }
 
         // Call the API client
         const result = await astriaApi.retrievePrompt(tuneId, promptId);
@@ -65,25 +64,14 @@ export async function handlePromptResource(uri: URL, params: Record<string, unkn
 
             for (const [index, imageUrl] of result.images.entries()) {
                 try {
-                    // Fetch the image data
-                    const axios = (await import('axios')).default;
-                    const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-
-                    // Convert to base64
-                    const buffer = Buffer.from(response.data, 'binary');
-                    const base64Data = buffer.toString('base64');
-
-                    // Determine MIME type based on URL extension
-                    let mimeType = 'image/jpeg'; // Default
-                    if (imageUrl.endsWith('.png')) mimeType = 'image/png';
-                    else if (imageUrl.endsWith('.gif')) mimeType = 'image/gif';
-                    else if (imageUrl.endsWith('.webp')) mimeType = 'image/webp';
+                    // Fetch the image data using our utility function
+                    const { data, mimeType } = await fetchImageAsBase64(imageUrl);
 
                     // Add the image directly to the response
                     contents.push({
                         uri: `${uri.href}/image/${index}`,
-                        mimeType: mimeType,
-                        text: base64Data
+                        mimeType,
+                        text: data
                     });
 
                     // Add a caption for the image
@@ -114,9 +102,11 @@ export async function handlePromptResource(uri: URL, params: Record<string, unkn
 
         return { contents };
     } catch (error: any) {
-        console.error(`MCP Error reading astria_prompt resource (tune=${params.tune_id}, prompt=${params.prompt_id}): ${error.message}`);
+        if (FEATURES.LOG_ERRORS) {
+            console.error(`MCP Error reading astria_prompt resource (tune=${params.tune_id}, prompt=${params.prompt_id}): ${error.message}`);
+        }
 
-        // Return a user-friendly error message instead of throwing
+        // Return a user-friendly error message
         return {
             contents: [{
                 uri: uri.href,

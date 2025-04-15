@@ -1,15 +1,15 @@
-/**
- * Image resource implementation for Astria MCP
- */
-
 import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
+import { FEATURES } from '../config';
+import { fetchImageAsBase64 } from '../utils/helpers';
 
 // Resource template for retrieving an image
 // Format: astria://image/{image_url}?thumbnail=true
 export const ImageResourceTemplate = new ResourceTemplate("astria://image/{image_url}{?thumbnail}", {
     list: async () => {
-        console.error('MCP Resource List: astria_image (not applicable)');
+        if (FEATURES.LOG_ERRORS) {
+            console.error('MCP Resource List: astria_image (not applicable)');
+        }
         return { resources: [] };
     },
     complete: {
@@ -22,30 +22,26 @@ export const ImageResourceTemplate = new ResourceTemplate("astria://image/{image
 export async function handleImageResource(uri: URL, params: Record<string, unknown>): Promise<ReadResourceResult> {
     try {
         const imageUrl = decodeURIComponent(params.image_url as string);
-        console.error(`MCP Resource Read: astria_image with URL=${imageUrl}`);
+        if (FEATURES.LOG_ERRORS) {
+            console.error(`MCP Resource Read: astria_image with URL=${imageUrl}`);
+        }
         const requestThumbnail = params.thumbnail === 'true';
 
         if (requestThumbnail) {
             try {
-                const axios = (await import('axios')).default;
-                const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-                const buffer = Buffer.from(response.data, 'binary');
-                const base64Data = buffer.toString('base64');
-
-                let mimeType = 'image/jpeg';
-                if (imageUrl.endsWith('.png')) mimeType = 'image/png';
-                else if (imageUrl.endsWith('.gif')) mimeType = 'image/gif';
-                else if (imageUrl.endsWith('.webp')) mimeType = 'image/webp';
+                const { data, mimeType } = await fetchImageAsBase64(imageUrl);
 
                 return {
                     contents: [{
                         uri: uri.href,
-                        mimeType: mimeType,
-                        text: base64Data
+                        mimeType,
+                        text: data
                     }]
                 };
             } catch (thumbnailError: any) {
-                console.error(`Failed to generate thumbnail: ${thumbnailError.message || thumbnailError}`);
+                if (FEATURES.LOG_ERRORS) {
+                    console.error(`Failed to generate thumbnail: ${thumbnailError.message || thumbnailError}`);
+                }
             }
         }
 
@@ -61,7 +57,9 @@ export async function handleImageResource(uri: URL, params: Record<string, unkno
             }]
         };
     } catch (error: any) {
-        console.error(`MCP Error reading image resource (${params.image_url}): ${error.message}`);
+        if (FEATURES.LOG_ERRORS) {
+            console.error(`MCP Error reading image resource (${params.image_url}): ${error.message}`);
+        }
         throw new Error(`Failed to process image resource: ${error.message}`);
     }
 }

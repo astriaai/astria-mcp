@@ -1,39 +1,40 @@
-// Configuration settings for the Astria MCP implementation
-
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-export const API_CONFIG = {
+// API configuration
+export const API = {
   BASE_URL: 'https://api.astria.ai',
-  API_KEY: process.env.ASTRIA_API_KEY || '',
+  KEY: process.env.ASTRIA_API_KEY || '',
   TIMEOUT_MS: 30000,
-  MAX_POLLING_ATTEMPTS: 30,
-  POLLING_DELAY_MS: 2000
+  POLLING: {
+    MAX_ATTEMPTS: 30,
+    DELAY_MS: 2000
+  }
 };
 
-export const MODEL_CONFIG = {
-  FLUX_MODEL_ID: 1504944,
-  MODEL_IDS: {
-    'flux': 1504944
+// Model configuration
+export const MODELS = {
+  FLUX: {
+    ID: 1504944,
+    NAME: 'flux'
   },
-  DEFAULT_MODEL: 'flux'
+  DEFAULT: 'flux'
 };
 
-export const VALIDATION_CONFIG = {
-  MIN_IMAGES_FOR_TUNE: 4,
-  MAX_IMAGES_FOR_TUNE: 20,
-  VALID_SUBJECT_TYPES: ['man', 'woman', 'cat', 'dog', 'boy', 'girl', 'style'],
-  VALID_PRESETS: ['flux-lora-focus', 'flux-lora-portrait', 'flux-lora-fast']
+// Validation rules
+export const VALIDATION = {
+  TUNE: {
+    MIN_IMAGES: 4,
+    MAX_IMAGES: 20,
+    SUBJECT_TYPES: ['man', 'woman', 'cat', 'dog', 'boy', 'girl', 'style'],
+    PRESETS: ['flux-lora-focus', 'flux-lora-portrait', 'flux-lora-fast']
+  }
 };
 
-export const FEATURE_FLAGS = {
+// Feature flags
+export const FEATURES = {
   OPEN_IMAGES_IN_BROWSER: true,
   DISPLAY_IMAGES_IN_CHAT: true,
-  ENABLE_ERROR_LOGGING: true,
-  /**
-   * When enabled, all fine-tune requests will use 'fast' branch for mock testing
-   * This allows testing the API integration without incurring charges
-   */
-  ENABLE_TEST_MODE: process.env.ASTRIA_TEST_MODE === 'true' || false
+  LOG_ERRORS: process.env.ASTRIA_LOG_ERRORS === 'true'
 };

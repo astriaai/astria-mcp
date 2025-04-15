@@ -1,6 +1,4 @@
-/**
- * Error module exports
- */
+// Error module exports
 
 export * from './codes';
 export * from './errors';

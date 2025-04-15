@@ -1,9 +1,7 @@
-// Error handling utilities for the Astria SDK
-
 import axios from 'axios';
 import { AstriaError } from './errors';
 import { AstriaErrorCode } from './codes';
-import { FEATURE_FLAGS } from '../config';
+import { FEATURES } from '../config';
 
 export function createErrorFromResponse(error: any): AstriaError {
     // Default values
@@ -55,6 +53,27 @@ export function createErrorFromResponse(error: any): AstriaError {
                                 return String(e);
                             }
                         }).join(', ');
+                    } else if (typeof data === 'object') {
+                        // Try to extract field-specific errors (common in Astria API)
+                        const errorMessages: string[] = [];
+
+                        // Process each field in the response
+                        Object.entries(data).forEach(([field, value]) => {
+                            if (Array.isArray(value)) {
+                                // Format: { field: ["error message", "another error"] }
+                                errorMessages.push(`${field}: ${value.join(', ')}`);
+                            } else if (typeof value === 'string') {
+                                // Format: { field: "error message" }
+                                errorMessages.push(`${field}: ${value}`);
+                            }
+                        });
+
+                        if (errorMessages.length > 0) {
+                            message = errorMessages.join('; ');
+                        } else {
+                            // If we couldn't extract specific errors, use a generic message with the status
+                            message = `API error (${httpStatus || 'unknown status'})`;
+                        }
                     } else {
                         // Use a generic message with the status
                         message = `API error (${httpStatus || 'unknown status'})`;
@@ -88,7 +107,7 @@ export function createErrorFromResponse(error: any): AstriaError {
 }
 
 export function logError(error: AstriaError, context?: string): void {
-    if (FEATURE_FLAGS.ENABLE_ERROR_LOGGING) {
+    if (FEATURES.LOG_ERRORS) {
         const contextStr = context ? `[${context}] ` : '';
         console.error(`${contextStr}[${error.code}] ${error.message}`, error.details || '');
     }

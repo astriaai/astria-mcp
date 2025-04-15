@@ -1,6 +1,4 @@
-/**
- * Resource module exports
- */
+//  Resource module exports
 
 export * from './tune-resource';
 export * from './prompt-resource';

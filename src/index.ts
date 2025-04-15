@@ -1,11 +1,6 @@
-/**
- * @file Main entry point for the Astria MCP implementation
- * @description Sets up the MCP server and registers the tools
- */
-
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { MODEL_CONFIG } from './config';
+import { MODELS } from './config';
 import {
     CreateTuneRawSchema,
     ListTunesRawSchema,
@@ -55,11 +50,8 @@ server.tool(
 
 
 // Tool 3: Generate Image
-// Create a dynamic description that includes all available models
-const AVAILABLE_MODELS = Object.keys(MODEL_CONFIG.MODEL_IDS);
-const modelDescription = AVAILABLE_MODELS.length > 1
-    ? `Available models: ${AVAILABLE_MODELS.join(', ')}`
-    : `Using the ${AVAILABLE_MODELS[0]} model`;
+// Create a description for the available model
+const modelDescription = `Using the ${MODELS.FLUX.NAME} model`;
 
 server.tool(
     "generate_image",

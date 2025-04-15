@@ -22,7 +22,6 @@ Open your Claude desktop app, and go to settings -> Developer -> Edit config
       ],
       "env": {
         "ASTRIA_API_KEY": "YOUR_API_KEY => https://www.astria.ai/users/edit#api",
-        "ASTRIA_TEST_MODE": "false" // Set to "true" to enable test mode without incurring charges
       }
     }
   }
