@@ -1,4 +1,6 @@
 import dotenv from 'dotenv';
+import path from 'path';
+import os from 'os';
 
 dotenv.config();
 
@@ -32,9 +34,23 @@ export const VALIDATION = {
   }
 };
 
+// Storage configuration
+export const STORAGE = {
+  // Default directory for storing generated images and training images
+  // Can be overridden with ASTRIA_IMAGE_DIRECTORY environment variable
+  IMAGE_DIRECTORY: process.env.ASTRIA_IMAGE_DIRECTORY || (
+    process.platform === 'win32'
+      ? path.join(os.homedir(), 'AppData', 'Local', 'astria-mcp')
+      : path.join(os.homedir(), '.astria-mcp')
+  ),
+  // Subdirectory for training images used in fine-tuning
+  TUNE_IMAGES_SUBDIRECTORY: 'tune_images'
+};
+
 // Feature flags
 export const FEATURES = {
-  OPEN_IMAGES_IN_BROWSER: true,
-  DISPLAY_IMAGES_IN_CHAT: true,
+  // Display images directly in chat
+  DISPLAY_IMAGES_IN_CHAT: process.env.ASTRIA_DISPLAY_IMAGES_IN_CHAT !== 'false',
+  // Log errors to console
   LOG_ERRORS: process.env.ASTRIA_LOG_ERRORS === 'true'
 };

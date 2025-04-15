@@ -3,13 +3,16 @@ import { ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 import { astriaApi } from '../api/client';
 import { parseId, fetchImageAsBase64 } from '../utils/helpers';
 import { FEATURES } from '../config';
+import { handleMcpError } from '../errors/index.js';
 
 // Resource template for retrieving a specific prompt
+// Uses the format astria://tune/{tune_id}/prompt/{prompt_id} to access prompt information
 export const PromptResourceTemplate = new ResourceTemplate("astria://tune/{tune_id}/prompt/{prompt_id}", {
     list: undefined
 });
 
 // Handles the prompt resource request
+// Retrieves prompt details and associated images from the Astria API
 export async function handlePromptResource(uri: URL, params: Record<string, unknown>): Promise<ReadResourceResult> {
     // Special case for the info URI
     if (uri.href === "astria://prompt/info") {
@@ -102,17 +105,18 @@ export async function handlePromptResource(uri: URL, params: Record<string, unkn
 
         return { contents };
     } catch (error: any) {
-        if (FEATURES.LOG_ERRORS) {
-            console.error(`MCP Error reading astria_prompt resource (tune=${params.tune_id}, prompt=${params.prompt_id}): ${error.message}`);
+        // Special handling for specific error types before using the standard handler
+        if (error.message && typeof error.message === 'string') {
+            if (error.message.includes('RESOURCE_NOT_FOUND') || error.message.includes('API error (404)')) {
+                error.message = `${error.message} - The requested prompt (tune ID: ${params.tune_id}, prompt ID: ${params.prompt_id}) was not found. Please check that the IDs are correct.`;
+            } else if (error.message.includes('API error (401)') || error.message.includes('API error (403)')) {
+                error.message = `${error.message} - This is an authentication error. Please check your API key and permissions.`;
+            } else if (error.message.includes('NETWORK_ERROR') || error.message.includes('TIMEOUT_ERROR')) {
+                error.message = `${error.message} - This is a network or timeout error. Please check your connection.`;
+            }
         }
 
-        // Return a user-friendly error message
-        return {
-            contents: [{
-                uri: uri.href,
-                mimeType: "text/plain",
-                text: `Error: Failed to read Astria prompt resource: ${error.message}\n\nPlease check that the tune ID and prompt ID are correct and try again.`
-            }]
-        };
+        // Use the standardized error handler
+        return handleMcpError(error, 'prompt_resource', true);
     }
 }

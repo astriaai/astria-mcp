@@ -1,10 +1,12 @@
 import { z } from 'zod';
 import { TextContent } from '@modelcontextprotocol/sdk/types.js';
-import { astriaApi } from '../api/client';
-import { FEATURES, MODELS } from '../config';
-import { AstriaError, AstriaErrorCode } from '../errors/index';
-import { TuneInfo } from '../api/types';
-import { fetchImageAsBase64 } from '../utils/helpers';
+import { astriaApi } from '../api/client.js';
+import { FEATURES, MODELS } from '../config.js';
+import { AstriaError, AstriaErrorCode, handleMcpError } from '../errors/index.js';
+import { TuneInfo } from '../api/types.js';
+import { fetchImageAsBase64 } from '../utils/helpers.js';
+import { saveBase64Image, openFile } from '../utils/file-system.js';
+import path from 'path';
 
 const AVAILABLE_MODELS = [MODELS.FLUX.NAME] as [string, ...string[]];
 
@@ -37,6 +39,7 @@ export const GenerateImageSchema = z.object(GenerateImageRawSchema);
 export type GenerateImageInput = z.infer<typeof GenerateImageSchema>;
 
 // Validates a LoRA tune and returns its details
+// Checks if the tune exists, is trained, and is a LoRA type
 export async function validateLoraTune(tuneId: number): Promise<TuneInfo> {
     try {
         // Retrieve the tune details
@@ -77,6 +80,8 @@ export async function validateLoraTune(tuneId: number): Promise<TuneInfo> {
     }
 }
 
+// Handles the generate image request
+// Processes the parameters, validates LoRAs, generates images, and formats the response
 export async function handleGenerateImage(params: any): Promise<any> {
     try {
         const parsedParams = GenerateImageSchema.parse(params);
@@ -166,18 +171,70 @@ export async function handleGenerateImage(params: any): Promise<any> {
         // Extract image URLs - in Astria API, images is an array of URLs
         const imageUrls = result.images || [];
 
-        // Only open the browser if we have valid images
-        if (imageUrls.length > 0 && FEATURES.OPEN_IMAGES_IN_BROWSER) {
+        // Array to store local file paths
+        const localFilePaths: string[] = [];
+
+        // Save images locally if we have valid images
+        if (imageUrls.length > 0) {
             try {
-                const open = (await import('open')).default;
-                await open(imageUrls[0]);
-                if (FEATURES.LOG_ERRORS) {
-                    console.error(`Opened image in browser: ${imageUrls[0]}`);
+                // Save each image to local storage
+                for (let i = 0; i < imageUrls.length; i++) {
+                    const imageUrl = imageUrls[i];
+                    const { data, mimeType } = await fetchImageAsBase64(imageUrl);
+
+                    // Generate a filename based on the prompt and index
+                    const promptWords = parsedParams.prompt.split(' ').slice(0, 3).join('-');
+                    const sanitizedPrompt = promptWords.replace(/[^a-zA-Z0-9-]/g, '');
+                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                    const extension = mimeType.split('/')[1] || 'png';
+                    const filename = `${sanitizedPrompt}-${timestamp}${i > 0 ? `-${i+1}` : ''}.${extension}`;
+
+                    // Save the image
+                    const filePath = saveBase64Image(data, filename);
+                    localFilePaths.push(filePath);
+
+                    if (FEATURES.LOG_ERRORS) {
+                        console.error(`Saved image to: ${filePath}`);
+                    }
                 }
-            } catch (openError) {
-                if (FEATURES.LOG_ERRORS) {
-                    console.error(`Failed to open image in browser: ${openError}`);
+
+                // Open the first image if available
+                if (localFilePaths.length > 0) {
+                    // Try to open in local viewer first
+                    let localViewerSuccess = false;
+                    try {
+                        await openFile(localFilePaths[0]);
+                        localViewerSuccess = true;
+                        if (FEATURES.LOG_ERRORS) {
+                            console.error(`Opened image in local viewer: ${localFilePaths[0]}`);
+                        }
+                    } catch (openError) {
+                        if (FEATURES.LOG_ERRORS) {
+                            console.error(`Failed to open image in local viewer: ${openError}`);
+                        }
+                        // Local viewer failed, will try browser as fallback
+                    }
+
+                    // If local viewer failed, try browser as fallback
+                    if (!localViewerSuccess) {
+                        try {
+                            const open = (await import('open')).default;
+                            await open(imageUrls[0]);
+                            if (FEATURES.LOG_ERRORS) {
+                                console.error(`Opened image in browser as fallback: ${imageUrls[0]}`);
+                            }
+                        } catch (openError) {
+                            if (FEATURES.LOG_ERRORS) {
+                                console.error(`Failed to open image in browser: ${openError}`);
+                            }
+                        }
+                    }
                 }
+            } catch (saveError) {
+                if (FEATURES.LOG_ERRORS) {
+                    console.error(`Failed to save images locally: ${saveError}`);
+                }
+                // Continue without local files - we'll still have the URLs
             }
         }
 
@@ -236,10 +293,20 @@ export async function handleGenerateImage(params: any): Promise<any> {
                 }
             }
 
-            // Always provide the URL and resource URI as text
+            // Always provide the URL, local path, and resource URI as text
+            let resourceInfo = `\nImage URL: ${imageUrls[0]}`;
+
+            // Add local file path if available
+            if (localFilePaths.length > 0) {
+                resourceInfo += `\nLocal file: ${localFilePaths[0]}`;
+                resourceInfo += `\nSaved to: ${path.dirname(localFilePaths[0])}`;
+            }
+
+            resourceInfo += `\nResource URI: astria://image/${encodeURIComponent(imageUrls[0])}`;
+
             contentArray.push({
                 type: "text",
-                text: `\nImage URL: ${imageUrls[0]}\n\nResource URI: astria://image/${encodeURIComponent(imageUrls[0])}`
+                text: resourceInfo
             } as TextContent);
 
             // Add additional images as text references if there are any
@@ -247,7 +314,14 @@ export async function handleGenerateImage(params: any): Promise<any> {
                 let additionalText = `\n\nAdditional images:\n`;
                 for (let i = 1; i < imageUrls.length; i++) {
                     const resourceUri = `astria://image/${encodeURIComponent(imageUrls[i])}`;
-                    additionalText += `${i+1}. Image URL: ${imageUrls[i]}\n   Resource URI: ${resourceUri}\n`;
+                    additionalText += `${i+1}. Image URL: ${imageUrls[i]}\n`;
+
+                    // Add local file path if available
+                    if (i < localFilePaths.length) {
+                        additionalText += `   Local file: ${localFilePaths[i]}\n`;
+                    }
+
+                    additionalText += `   Resource URI: ${resourceUri}\n`;
                 }
                 contentArray.push({ type: "text", text: additionalText } as TextContent);
             }
@@ -264,39 +338,31 @@ export async function handleGenerateImage(params: any): Promise<any> {
             };
         }
     } catch (error: any) {
-        if (FEATURES.LOG_ERRORS) {
-            console.error(`MCP Error in generate_image tool: ${error.message}`);
+        // Special handling for specific error types before using the standard handler
+        if (error.message && typeof error.message === 'string') {
+            // Add context for common Astria API errors
+            if (error.message.includes('text: must include')) {
+                // This is likely a LoRA that requires a specific token
+                const tokenMatch = error.message.match(/must include [`']([^'`]+)[`']/i);
+                const requiredToken = tokenMatch ? tokenMatch[1] : 'specific token';
+
+                error.message = `${error.message}\n\nThis error occurs when using a LoRA that requires a specific token in the prompt. ` +
+                    `Please add "${requiredToken}" to your prompt text when using this LoRA.`;
+            } else if (error.message.includes('Model branch mismatch')) {
+                // This is a branch mismatch error (trying to combine incompatible LoRAs)
+                error.message = `${error.message}\n\nThis error occurs when trying to combine LoRAs from different model branches. ` +
+                    `You can only combine LoRAs that are from the same branch (e.g., all flux1 or all sd15).`;
+            } else if (error.message.includes('API error (422)')) {
+                // Generic validation error - add more context
+                error.message = `${error.message}\n\nThis may be due to:\n` +
+                    `- Invalid LoRA ID or LoRA not accessible\n` +
+                    `- Missing required token for a LoRA\n` +
+                    `- Incompatible LoRAs from different branches\n` +
+                    `- Other validation issues with the prompt or parameters`;
+            }
         }
 
-        let errorMessage = error.message || 'Unknown error';
-
-        // Add context for common Astria API errors
-        if (errorMessage.includes('text: must include')) {
-            // This is likely a LoRA that requires a specific token
-            const tokenMatch = errorMessage.match(/must include [`']([^'`]+)[`']/i);
-            const requiredToken = tokenMatch ? tokenMatch[1] : 'specific token';
-
-            errorMessage = `${errorMessage}\n\nThis error occurs when using a LoRA that requires a specific token in the prompt. ` +
-                `Please add "${requiredToken}" to your prompt text when using this LoRA.`;
-        } else if (errorMessage.includes('Model branch mismatch')) {
-            // This is a branch mismatch error (trying to combine incompatible LoRAs)
-            errorMessage = `${errorMessage}\n\nThis error occurs when trying to combine LoRAs from different model branches. ` +
-                `You can only combine LoRAs that are from the same branch (e.g., all flux1 or all sd15).`;
-        } else if (errorMessage.includes('API error (422)')) {
-            // Generic validation error - add more context
-            errorMessage = `${errorMessage}\n\nThis may be due to:\n` +
-                `- Invalid LoRA ID or LoRA not accessible\n` +
-                `- Missing required token for a LoRA\n` +
-                `- Incompatible LoRAs from different branches\n` +
-                `- Other validation issues with the prompt or parameters`;
-        }
-
-        const displayMessage = error instanceof z.ZodError
-            ? `Invalid input parameters: ${error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`
-            : `Error generating image: ${errorMessage}`;
-        return {
-            isError: true,
-            content: [{ type: "text", text: displayMessage } as TextContent],
-        };
+        // Use the standardized error handler
+        return handleMcpError(error, 'generate_image');
     }
 }

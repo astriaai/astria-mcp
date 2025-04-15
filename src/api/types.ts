@@ -26,10 +26,16 @@ export interface TuneInfo {
 }
 
 
+export interface ImageData {
+    name: string;
+    data: string;
+}
+
 export interface CreateTuneParams {
     title: string;
     name: string;
-    image_urls: string[];
+    image_urls?: string[];
+    image_data?: ImageData[];
     preset?: string;
     callback?: string;
     characteristics?: Record<string, string>;

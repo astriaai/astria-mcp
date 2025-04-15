@@ -3,8 +3,10 @@ import { ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 import { astriaApi } from '../api/client';
 import { parseId } from '../utils/helpers';
 import { FEATURES } from '../config';
+import { handleMcpError } from '../errors/index.js';
 
 // Resource template for retrieving a specific tune
+// Uses the format astria://tune/{tune_id} to access tune information
 export const TuneResourceTemplate = new ResourceTemplate("astria://tune/{tune_id}", {
     // List callback to enumerate available tunes
     list: async (_extra) => {
@@ -15,9 +17,9 @@ export const TuneResourceTemplate = new ResourceTemplate("astria://tune/{tune_id
             const tunes = await astriaApi.listTunes();
             return {
                 resources: tunes
-                    .filter(tune => tune.model_type === 'lora' && tune.trained_at)
+                    .filter(tune => tune.model_type === 'lora' && tune.trained_at && tune.base_tune_id === 1504944 && !tune.expires_at)
                     .map(tune => ({
-                        name: tune.title,
+                        name: `Flux-Lora: ${tune.title.length > 20 ? tune.title.slice(0, 20) + '...' : tune.title}`,
                         uri: `astria://tune/${tune.id}`,
                         title: tune.title || `Tune ${tune.id}`,
                         description: `${tune.name} fine-tune created on ${new Date(tune.created_at).toLocaleDateString()}`
@@ -47,7 +49,7 @@ export const TuneResourceTemplate = new ResourceTemplate("astria://tune/{tune_id
                 const tunes = await astriaApi.listTunes();
                 // Filter tunes by the partial ID if provided
                 const filteredIds = tunes
-                    .filter(tune => tune.model_type === 'lora' && tune.trained_at)
+                    .filter(tune => tune.model_type === 'lora' && tune.trained_at && tune.base_tune_id === 1504944)
                     .map(tune => tune.id.toString())
                     .filter(id => id.startsWith(value));
                 return filteredIds;
@@ -62,6 +64,7 @@ export const TuneResourceTemplate = new ResourceTemplate("astria://tune/{tune_id
 });
 
 // Handles the tune resource request
+// Retrieves tune details from the Astria API and formats them for display
 export async function handleTuneResource(uri: URL, params: Record<string, unknown>): Promise<ReadResourceResult> {
     let tuneId: number;
     try {
@@ -97,22 +100,19 @@ export async function handleTuneResource(uri: URL, params: Record<string, unknow
             }]
         };
     } catch (error: any) {
-        if (FEATURES.LOG_ERRORS) {
-            console.error(`MCP Error reading astria_tune resource (${params.tune_id}): ${error.message}`);
+        // Special handling for specific error types before using the standard handler
+        if (error.message && typeof error.message === 'string') {
+            if (error.message.includes('RESOURCE_NOT_FOUND') || error.message.includes('API error (404)')) {
+                error.message = `${error.message} - The requested LoRA tune ID ${params.tune_id} was not found. Please check that the ID is correct and that you have access to it.`;
+            } else if (error.message.includes('API error (401)') || error.message.includes('API error (403)')) {
+                error.message = `${error.message} - This is an authentication error. Please check your API key and permissions.`;
+            } else if (error.message.includes('NETWORK_ERROR') || error.message.includes('TIMEOUT_ERROR')) {
+                error.message = `${error.message} - This is a network or timeout error. Please check your connection.`;
+            }
         }
 
-        let errorMessage = error.message || 'Unknown error';
-
-        // Add context for common Astria API errors
-        if (errorMessage.includes('RESOURCE_NOT_FOUND') || errorMessage.includes('API error (404)')) {
-            errorMessage = `${errorMessage} - The requested LoRA tune ID ${params.tune_id} was not found. Please check that the ID is correct and that you have access to it.`;
-        } else if (errorMessage.includes('API error (401)') || errorMessage.includes('API error (403)')) {
-            errorMessage = `${errorMessage} - This is an authentication error. Please check your API key and permissions.`;
-        } else if (errorMessage.includes('NETWORK_ERROR') || errorMessage.includes('TIMEOUT_ERROR')) {
-            errorMessage = `${errorMessage} - This is a network or timeout error. Please check your connection.`;
-        }
-
-        throw new Error(`Failed to read Astria tune resource: ${errorMessage}`);
+        // Use the standardized error handler
+        return handleMcpError(error, 'tune_resource', true);
     }
 }
 

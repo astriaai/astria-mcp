@@ -2,6 +2,7 @@ import axios from 'axios';
 import { AstriaError } from './errors';
 import { AstriaErrorCode } from './codes';
 import { FEATURES } from '../config';
+import { z } from 'zod';
 
 export function createErrorFromResponse(error: any): AstriaError {
     // Default values
@@ -110,5 +111,47 @@ export function logError(error: AstriaError, context?: string): void {
     if (FEATURES.LOG_ERRORS) {
         const contextStr = context ? `[${context}] ` : '';
         console.error(`${contextStr}[${error.code}] ${error.message}`, error.details || '');
+    }
+}
+
+/**
+ * Standardized error handler for MCP tools and resources
+ *
+ * This function provides a consistent way to handle errors across all MCP tools and resources.
+ * It converts any error to an AstriaError, logs it if logging is enabled, and returns a
+ * standardized error response object that can be returned directly from tool/resource handlers.
+ *
+ * @param error The error to handle
+ * @param context A string describing the context where the error occurred (e.g., 'generate_image')
+ * @param isResource Whether this is being called from a resource handler (affects return format)
+ * @returns A standardized error response object
+ */
+export function handleMcpError(error: any, context: string, isResource: boolean = false): any {
+    // Convert to AstriaError if it's not already
+    const astriaError = error instanceof AstriaError
+        ? error
+        : createErrorFromResponse(error);
+
+    // Log the error if logging is enabled
+    if (FEATURES.LOG_ERRORS) {
+        console.error(`MCP Error in ${context}: ${astriaError.message}`);
+    }
+
+    // Create a user-friendly error message
+    let errorMessage = astriaError.toUserMessage();
+
+    // For Zod validation errors, create a more specific message
+    if (error instanceof z.ZodError) {
+        errorMessage = `Invalid input parameters: ${error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`;
+    }
+
+    // Return the appropriate error response format based on whether this is a tool or resource
+    if (isResource) {
+        throw new Error(`Failed to process ${context}: ${errorMessage}`);
+    } else {
+        return {
+            isError: true,
+            content: [{ type: "text", text: `Error in ${context}: ${errorMessage}` }],
+        };
     }
 }

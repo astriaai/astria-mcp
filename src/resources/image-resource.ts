@@ -2,9 +2,11 @@ import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 import { FEATURES } from '../config';
 import { fetchImageAsBase64 } from '../utils/helpers';
+import { handleMcpError } from '../errors/index.js';
 
 // Resource template for retrieving an image
 // Format: astria://image/{image_url}?thumbnail=true
+// Allows accessing images by URL with optional thumbnail generation
 export const ImageResourceTemplate = new ResourceTemplate("astria://image/{image_url}{?thumbnail}", {
     list: async () => {
         if (FEATURES.LOG_ERRORS) {
@@ -19,6 +21,7 @@ export const ImageResourceTemplate = new ResourceTemplate("astria://image/{image
 });
 
 // Handles the image resource request
+// Either returns the image as base64 data (when thumbnail=true) or as a URL
 export async function handleImageResource(uri: URL, params: Record<string, unknown>): Promise<ReadResourceResult> {
     try {
         const imageUrl = decodeURIComponent(params.image_url as string);
@@ -57,9 +60,14 @@ export async function handleImageResource(uri: URL, params: Record<string, unkno
             }]
         };
     } catch (error: any) {
-        if (FEATURES.LOG_ERRORS) {
-            console.error(`MCP Error reading image resource (${params.image_url}): ${error.message}`);
+        // Special handling for specific error types before using the standard handler
+        if (error.message && typeof error.message === 'string') {
+            if (error.message.includes('NETWORK_ERROR') || error.message.includes('TIMEOUT_ERROR')) {
+                error.message = `${error.message} - Failed to fetch the image. Please check that the URL is accessible.`;
+            }
         }
-        throw new Error(`Failed to process image resource: ${error.message}`);
+
+        // Use the standardized error handler
+        return handleMcpError(error, 'image_resource', true);
     }
 }

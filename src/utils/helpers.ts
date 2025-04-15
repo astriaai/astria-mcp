@@ -1,6 +1,7 @@
 // Utility functions for the Astria MCP implementation
 
 // Parses a string ID into a number
+// Validates that the ID is a positive integer and throws descriptive errors
 export function parseId(idString: unknown, paramName: string): number {
     if (typeof idString !== 'string') {
         throw new Error(`Invalid type for ${paramName}: expected string, got ${typeof idString}`);
@@ -48,6 +49,7 @@ export function safeJsonParse<T>(jsonString: string, defaultValue: T): T {
 }
 
 // Determines the MIME type based on a file extension in a URL
+// Falls back to image/jpeg if the extension is not recognized
 export function getMimeTypeFromUrl(url: string): string {
     if (url.endsWith('.png')) return 'image/png';
     if (url.endsWith('.gif')) return 'image/gif';
@@ -58,11 +60,22 @@ export function getMimeTypeFromUrl(url: string): string {
 }
 
 // Fetches an image and returns it as a base64-encoded string
+// Uses axios to download the image and determines the MIME type from the URL
 export async function fetchImageAsBase64(imageUrl: string): Promise<{ data: string, mimeType: string }> {
-    const axios = (await import('axios')).default;
-    const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-    const buffer = Buffer.from(response.data, 'binary');
-    const base64Data = buffer.toString('base64');
-    const mimeType = getMimeTypeFromUrl(imageUrl);
-    return { data: base64Data, mimeType };
+    try {
+        const axios = (await import('axios')).default;
+        const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+
+        // Get the MIME type before we start processing the data
+        const mimeType = getMimeTypeFromUrl(imageUrl);
+
+        // Process the data
+        const buffer = Buffer.from(response.data, 'binary');
+        const base64Data = buffer.toString('base64');
+
+        return { data: base64Data, mimeType };
+    } catch (error) {
+        throw error;
+    }
 }
+

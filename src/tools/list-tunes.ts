@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { TextContent } from '@modelcontextprotocol/sdk/types.js';
 import { astriaApi } from '../api/client';
 import { FEATURES } from '../config';
+import { handleMcpError } from '../errors/index.js';
 
 export const ListTunesRawSchema = {
     offset: z.number().int().min(0).optional().describe("Starting offset for the list (page size is 20). Default 0.")
@@ -11,6 +12,8 @@ export const ListTunesSchema = z.object(ListTunesRawSchema);
 
 export type ListTunesInput = z.infer<typeof ListTunesSchema>;
 
+// Handles the list tunes request
+// Retrieves a list of the user's tunes from the Astria API
 export async function handleListTunes(params: any): Promise<any> {
     try {
         const parsedParams = ListTunesSchema.parse(params);
@@ -27,26 +30,18 @@ export async function handleListTunes(params: any): Promise<any> {
             } as TextContent],
         };
     } catch (error: any) {
-        if (FEATURES.LOG_ERRORS) {
-            console.error(`MCP Error in list_tunes tool: ${error.message}`);
+        // Special handling for specific error types before using the standard handler
+        if (error.message && typeof error.message === 'string') {
+            if (error.message.includes('API error (401)') || error.message.includes('API error (403)')) {
+                error.message = `${error.message}\n\nThis is an authentication error. Please check that your Astria API key is valid and has the necessary permissions.`;
+            } else if (error.message.includes('NETWORK_ERROR') || error.message.includes('TIMEOUT_ERROR')) {
+                error.message = `${error.message}\n\nThis is a network or timeout error. Please check your internet connection and try again. If the problem persists, the Astria API may be experiencing issues.`;
+            } else if (error.message.includes('API error (429)')) {
+                error.message = `${error.message}\n\nYou have exceeded the rate limit for the Astria API. Please wait a moment and try again.`;
+            }
         }
 
-        let errorMessage = error.message || 'Unknown error';
-
-        if (errorMessage.includes('API error (401)') || errorMessage.includes('API error (403)')) {
-            errorMessage = `${errorMessage}\n\nThis is an authentication error. Please check that your Astria API key is valid and has the necessary permissions.`;
-        } else if (errorMessage.includes('NETWORK_ERROR') || errorMessage.includes('TIMEOUT_ERROR')) {
-            errorMessage = `${errorMessage}\n\nThis is a network or timeout error. Please check your internet connection and try again. If the problem persists, the Astria API may be experiencing issues.`;
-        } else if (errorMessage.includes('API error (429)')) {
-            errorMessage = `${errorMessage}\n\nYou have exceeded the rate limit for the Astria API. Please wait a moment and try again.`;
-        }
-
-        const displayMessage = error instanceof z.ZodError
-            ? `Invalid input parameters: ${error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`
-            : `Error listing tunes: ${errorMessage}`;
-        return {
-            isError: true,
-            content: [{ type: "text", text: displayMessage } as TextContent],
-        };
+        // Use the standardized error handler
+        return handleMcpError(error, 'list_tunes');
     }
 }

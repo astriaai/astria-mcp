@@ -1,6 +1,7 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { MODELS } from './config';
+import { MODELS, FEATURES, STORAGE } from './config.js';
+import { ensureDirectoriesExist } from './utils/file-system.js';
 import {
     CreateTuneRawSchema,
     ListTunesRawSchema,
@@ -35,7 +36,7 @@ server.resource("astria_image", ImageResourceTemplate, handleImageResource);
 // Tool 1: Create Tune
 server.tool(
     "create_tune",
-    "Creates a new Astria fine-tune using Flux defaults. Requires valid image URLs that are publicly accessible. Images must be clear portraits for best results.",
+    "Creates a new Astria fine-tune using Flux defaults. Accepts either publicly accessible image URLs or direct image uploads as base64 data. Images must be clear portraits for best results.",
     CreateTuneRawSchema,
     handleCreateTune
 );
@@ -64,6 +65,19 @@ server.tool(
 async function main() {
     try {
         console.error("Starting Astria MCP Server...");
+
+        // Initialize file system directories
+        try {
+            ensureDirectoriesExist();
+            if (FEATURES.LOG_ERRORS) {
+                console.error(`Storage directory: ${STORAGE.IMAGE_DIRECTORY}`);
+                console.error(`Tune images directory: ${STORAGE.IMAGE_DIRECTORY}/${STORAGE.TUNE_IMAGES_SUBDIRECTORY}`);
+            }
+        } catch (initError: any) {
+            console.error(`Failed to initialize directories: ${initError.message}`);
+            // Continue anyway - we'll fall back to URL-only mode
+        }
+
         const transport = new StdioServerTransport();
         await server.connect(transport);
         console.error("Astria MCP Server connected via stdio.");

@@ -26,6 +26,8 @@ export class AstriaApiClient {
         });
     }
 
+    // Creates a new fine-tune with the provided parameters
+    // Handles both image URLs and direct image uploads
     async createTune(tuneData: CreateTuneParams): Promise<TuneInfo> {
         try {
             const FormData = require('form-data');
@@ -52,9 +54,21 @@ export class AstriaApiClient {
                 formData.append('tune[branch]', tuneData.branch);
             }
 
+            // Handle image URLs if provided
             if (tuneData.image_urls && tuneData.image_urls.length > 0) {
                 for (const url of tuneData.image_urls) {
                     formData.append('tune[image_urls][]', url);
+                }
+            }
+
+            // Handle image data if provided
+            if (tuneData.image_data && tuneData.image_data.length > 0) {
+                for (const imageData of tuneData.image_data) {
+                    const buffer = Buffer.from(imageData.data, 'base64');
+                    formData.append('tune[images][]', buffer, {
+                        filename: imageData.name,
+                        contentType: this.getMimeTypeFromFilename(imageData.name)
+                    });
                 }
             }
 
@@ -74,6 +88,8 @@ export class AstriaApiClient {
         }
     }
 
+    // Lists all tunes available to the user
+    // Supports pagination with the offset parameter
     async listTunes(offset?: number): Promise<ListTunesResponse> {
         try {
             const params = offset !== undefined ? { offset } : {};
@@ -88,6 +104,7 @@ export class AstriaApiClient {
         }
     }
 
+    // Retrieves detailed information about a specific tune
     async retrieveTune(tuneId: number): Promise<TuneInfo> {
         try {
             const response = await this.axiosInstance.get(`/tunes/${tuneId}`);
@@ -101,6 +118,8 @@ export class AstriaApiClient {
         }
     }
 
+    // Generates images using the specified model and prompt parameters
+    // Automatically polls for completion if the images aren't immediately available
     async generateImage(modelName: string, promptData: GenerateImageParams): Promise<GenerateImageResponse> {
         try {
             let modelId: number;
@@ -134,6 +153,8 @@ export class AstriaApiClient {
         }
     }
 
+    // Polls the API until the prompt generation is complete or times out
+    // Used internally by generateImage when images aren't immediately available
     private async pollForPromptCompletion(
         tuneId: number,
         promptId: number,
@@ -183,6 +204,8 @@ export class AstriaApiClient {
         );
     }
 
+    // Lists all prompts for a specific tune
+    // Supports pagination with the offset parameter
     async listPrompts(tuneId: number, offset?: number): Promise<any[]> {
         try {
             const params = offset !== undefined ? { offset } : {};
@@ -197,6 +220,8 @@ export class AstriaApiClient {
         }
     }
 
+    // Retrieves detailed information about a specific prompt
+    // Includes the prompt text, status, and generated images
     async retrievePrompt(tuneId: number, promptId: number): Promise<any> {
         try {
             const response = await this.axiosInstance.get(`/tunes/${tuneId}/prompts/${promptId}`);
@@ -207,6 +232,25 @@ export class AstriaApiClient {
                 console.error(`[${astriaError.code}] Failed to retrieve prompt:`, astriaError);
             }
             throw astriaError;
+        }
+    }
+
+    // Determines the MIME type based on a file extension
+    // Used when uploading images for fine-tuning
+    private getMimeTypeFromFilename(filename: string): string {
+        const ext = filename.toLowerCase().split('.').pop();
+        switch (ext) {
+            case 'jpg':
+            case 'jpeg':
+                return 'image/jpeg';
+            case 'png':
+                return 'image/png';
+            case 'gif':
+                return 'image/gif';
+            case 'webp':
+                return 'image/webp';
+            default:
+                return 'application/octet-stream';
         }
     }
 }
