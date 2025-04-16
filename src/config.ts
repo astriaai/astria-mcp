@@ -8,10 +8,10 @@ dotenv.config();
 export const API = {
   BASE_URL: 'https://api.astria.ai',
   KEY: process.env.ASTRIA_API_KEY || '',
-  TIMEOUT_MS: 30000,
+  TIMEOUT_MS: 300000,
   POLLING: {
-    MAX_ATTEMPTS: 30,
-    DELAY_MS: 2000
+    MAX_ATTEMPTS: 300,
+    DELAY_MS: 1000
   }
 };
 
@@ -28,7 +28,7 @@ export const MODELS = {
 export const VALIDATION = {
   TUNE: {
     MIN_IMAGES: 4,
-    MAX_IMAGES: 20,
+    MAX_IMAGES: 8,
     SUBJECT_TYPES: ['man', 'woman', 'cat', 'dog', 'boy', 'girl', 'style'],
     PRESETS: ['flux-lora-focus', 'flux-lora-portrait', 'flux-lora-fast']
   }
@@ -47,10 +47,3 @@ export const STORAGE = {
   TUNE_IMAGES_SUBDIRECTORY: 'tune_images'
 };
 
-// Feature flags
-export const FEATURES = {
-  // Display images directly in chat
-  DISPLAY_IMAGES_IN_CHAT: process.env.ASTRIA_DISPLAY_IMAGES_IN_CHAT !== 'false',
-  // Log errors to console
-  LOG_ERRORS: process.env.ASTRIA_LOG_ERRORS === 'true'
-};

@@ -1,5 +1,3 @@
-// Custom error classes for the Astria SDK
-
 import { AstriaErrorCode } from './codes';
 
 export class AstriaError extends Error {
@@ -17,7 +15,6 @@ export class AstriaError extends Error {
     toUserMessage(): string {
         let message = `${this.message}`;
 
-        // Add helpful context based on error code
         switch (this.code) {
             case AstriaErrorCode.AUTH_ERROR:
                 message += " Please check your API key.";

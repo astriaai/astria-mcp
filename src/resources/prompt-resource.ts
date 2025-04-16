@@ -2,19 +2,14 @@ import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 import { astriaApi } from '../api/client';
 import { parseId, fetchImageAsBase64 } from '../utils/helpers';
-import { FEATURES } from '../config';
 import { handleMcpError } from '../errors/index.js';
 
-// Resource template for retrieving a specific prompt
-// Uses the format astria://tune/{tune_id}/prompt/{prompt_id} to access prompt information
 export const PromptResourceTemplate = new ResourceTemplate("astria://tune/{tune_id}/prompt/{prompt_id}", {
     list: undefined
 });
 
-// Handles the prompt resource request
-// Retrieves prompt details and associated images from the Astria API
 export async function handlePromptResource(uri: URL, params: Record<string, unknown>): Promise<ReadResourceResult> {
-    // Special case for the info URI
+
     if (uri.href === "astria://prompt/info") {
         return {
             contents: [{
@@ -28,20 +23,12 @@ export async function handlePromptResource(uri: URL, params: Record<string, unkn
     let tuneId: number;
     let promptId: number;
     try {
-        // Parse and validate both IDs from the URI template parameters
         tuneId = parseId(params.tune_id, 'tune_id');
         promptId = parseId(params.prompt_id, 'prompt_id');
-        if (FEATURES.LOG_ERRORS) {
-            console.error(`MCP Resource Read: astria_prompt with tune_id=${tuneId}, prompt_id=${promptId}`);
-        }
 
-        // Call the API client
         const result = await astriaApi.retrievePrompt(tuneId, promptId);
-
-        // Create an array of contents to return
         const contents = [];
 
-        // Add a human-readable summary of the prompt
         const summaryText = `Prompt ID: ${result.id}\n` +
             `Tune ID: ${tuneId}\n` +
             `Text: ${result.text || 'N/A'}\n` +
@@ -56,9 +43,7 @@ export async function handlePromptResource(uri: URL, params: Record<string, unkn
             text: summaryText
         });
 
-        // Add image contents if available
         if (result.images && result.images.length > 0) {
-            // First add a header for the images section
             contents.push({
                 uri: `${uri.href}/images`,
                 mimeType: "text/plain",
@@ -67,17 +52,14 @@ export async function handlePromptResource(uri: URL, params: Record<string, unkn
 
             for (const [index, imageUrl] of result.images.entries()) {
                 try {
-                    // Fetch the image data using our utility function
                     const { data, mimeType } = await fetchImageAsBase64(imageUrl);
 
-                    // Add the image directly to the response
                     contents.push({
                         uri: `${uri.href}/image/${index}`,
                         mimeType,
                         text: data
                     });
 
-                    // Add a caption for the image
                     contents.push({
                         uri: `${uri.href}/image/${index}/caption`,
                         mimeType: "text/plain",
@@ -85,7 +67,6 @@ export async function handlePromptResource(uri: URL, params: Record<string, unkn
                     });
                 } catch (imageError) {
                     console.error(`Failed to fetch image data for ${imageUrl}: ${imageError}`);
-                    // Fall back to providing just the resource URI
                     const encodedUrl = encodeURIComponent(imageUrl);
                     contents.push({
                         uri: `${uri.href}/image/${index}`,
@@ -95,7 +76,6 @@ export async function handlePromptResource(uri: URL, params: Record<string, unkn
                 }
             }
         } else {
-            // If no images, add a message
             contents.push({
                 uri: `${uri.href}/no-images`,
                 mimeType: "text/plain",
@@ -105,7 +85,6 @@ export async function handlePromptResource(uri: URL, params: Record<string, unkn
 
         return { contents };
     } catch (error: any) {
-        // Special handling for specific error types before using the standard handler
         if (error.message && typeof error.message === 'string') {
             if (error.message.includes('RESOURCE_NOT_FOUND') || error.message.includes('API error (404)')) {
                 error.message = `${error.message} - The requested prompt (tune ID: ${params.tune_id}, prompt ID: ${params.prompt_id}) was not found. Please check that the IDs are correct.`;
@@ -116,7 +95,6 @@ export async function handlePromptResource(uri: URL, params: Record<string, unkn
             }
         }
 
-        // Use the standardized error handler
         return handleMcpError(error, 'prompt_resource', true);
     }
 }

@@ -1,7 +1,4 @@
-// Utility functions for the Astria MCP implementation
-
 // Parses a string ID into a number
-// Validates that the ID is a positive integer and throws descriptive errors
 export function parseId(idString: unknown, paramName: string): number {
     if (typeof idString !== 'string') {
         throw new Error(`Invalid type for ${paramName}: expected string, got ${typeof idString}`);
@@ -13,7 +10,7 @@ export function parseId(idString: unknown, paramName: string): number {
     return id;
 }
 
-// Validates a URL string
+
 export function isValidUrl(url: string): boolean {
     try {
         new URL(url);
@@ -23,7 +20,7 @@ export function isValidUrl(url: string): boolean {
     }
 }
 
-// Formats a date string for display
+
 export function formatDate(dateString: string | null | undefined): string {
     if (!dateString) return 'N/A';
     try {
@@ -34,12 +31,12 @@ export function formatDate(dateString: string | null | undefined): string {
     }
 }
 
-// Creates a delay using a Promise
+
 export function delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Safely parses JSON without throwing exceptions
+
 export function safeJsonParse<T>(jsonString: string, defaultValue: T): T {
     try {
         return JSON.parse(jsonString) as T;
@@ -48,8 +45,7 @@ export function safeJsonParse<T>(jsonString: string, defaultValue: T): T {
     }
 }
 
-// Determines the MIME type based on a file extension in a URL
-// Falls back to image/jpeg if the extension is not recognized
+
 export function getMimeTypeFromUrl(url: string): string {
     if (url.endsWith('.png')) return 'image/png';
     if (url.endsWith('.gif')) return 'image/gif';
@@ -59,23 +55,59 @@ export function getMimeTypeFromUrl(url: string): string {
     return 'image/jpeg'; // Default
 }
 
-// Fetches an image and returns it as a base64-encoded string
-// Uses axios to download the image and determines the MIME type from the URL
-export async function fetchImageAsBase64(imageUrl: string): Promise<{ data: string, mimeType: string }> {
-    try {
-        const axios = (await import('axios')).default;
-        const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
 
-        // Get the MIME type before we start processing the data
-        const mimeType = getMimeTypeFromUrl(imageUrl);
+export interface ImageOptions {
+  width?: number;
+  height?: number;
+  fit?: 'cover' | 'contain' | 'fill' | 'inside' | 'outside';
+  thumbnail?: boolean;
+}
 
-        // Process the data
+export async function fetchImageAsBase64(imageUrl: string, options?: ImageOptions): Promise<{ data: string, mimeType: string }> {
+    const axios = (await import('axios')).default;
+    const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+    const mimeType = getMimeTypeFromUrl(imageUrl);
+
+    // If no resize options are provided, return the original image
+    if (!options || (!options.width && !options.height && !options.thumbnail)) {
         const buffer = Buffer.from(response.data, 'binary');
         const base64Data = buffer.toString('base64');
-
         return { data: base64Data, mimeType };
-    } catch (error) {
-        throw error;
     }
+
+    // Use sharp to resize the image
+    const sharp = (await import('sharp')).default;
+    let sharpInstance = sharp(response.data);
+
+    // If thumbnail option is true, use it for better quality/size ratio
+    if (options.thumbnail) {
+        // Default thumbnail size if not specified
+        const width = options.width || 300;
+        const height = options.height;
+
+        sharpInstance = sharpInstance.resize({
+            width,
+            height,
+            fit: options.fit || 'inside',
+            withoutEnlargement: true
+        }).jpeg({
+            quality: 80,
+            progressive: true
+        });
+    } else {
+        // Regular resize with provided options
+        sharpInstance = sharpInstance.resize({
+            width: options.width,
+            height: options.height,
+            fit: options.fit || 'inside',
+            withoutEnlargement: true
+        });
+    }
+
+    // Convert to buffer and then to base64
+    const resizedBuffer = await sharpInstance.toBuffer();
+    const base64Data = resizedBuffer.toString('base64');
+
+    return { data: base64Data, mimeType };
 }
 

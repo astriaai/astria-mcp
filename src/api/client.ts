@@ -1,5 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
-import { API, MODELS, FEATURES } from '../config';
+import { API, MODELS } from '../config';
 import { AstriaError, AstriaErrorCode, createErrorFromResponse } from '../errors/index';
 import {
     CreateTuneParams,
@@ -26,8 +26,7 @@ export class AstriaApiClient {
         });
     }
 
-    // Creates a new fine-tune with the provided parameters
-    // Handles both image URLs and direct image uploads
+
     async createTune(tuneData: CreateTuneParams): Promise<TuneInfo> {
         try {
             const FormData = require('form-data');
@@ -81,15 +80,12 @@ export class AstriaApiClient {
             return response.data;
         } catch (error: any) {
             const astriaError = createErrorFromResponse(error);
-            if (FEATURES.LOG_ERRORS) {
-                console.error(`[${astriaError.code}] Failed to create tune:`, astriaError);
-            }
+
             throw astriaError;
         }
     }
 
-    // Lists all tunes available to the user
-    // Supports pagination with the offset parameter
+
     async listTunes(offset?: number): Promise<ListTunesResponse> {
         try {
             const params = offset !== undefined ? { offset } : {};
@@ -97,29 +93,24 @@ export class AstriaApiClient {
             return response.data;
         } catch (error: any) {
             const astriaError = createErrorFromResponse(error);
-            if (FEATURES.LOG_ERRORS) {
-                console.error(`[${astriaError.code}] Failed to list tunes:`, astriaError);
-            }
+
             throw astriaError;
         }
     }
 
-    // Retrieves detailed information about a specific tune
+
     async retrieveTune(tuneId: number): Promise<TuneInfo> {
         try {
             const response = await this.axiosInstance.get(`/tunes/${tuneId}`);
             return response.data;
         } catch (error: any) {
             const astriaError = createErrorFromResponse(error);
-            if (FEATURES.LOG_ERRORS) {
-                console.error(`[${astriaError.code}] Failed to retrieve tune:`, astriaError);
-            }
+
             throw astriaError;
         }
     }
 
-    // Generates images using the specified model and prompt parameters
-    // Automatically polls for completion if the images aren't immediately available
+
     async generateImage(modelName: string, promptData: GenerateImageParams): Promise<GenerateImageResponse> {
         try {
             let modelId: number;
@@ -146,15 +137,12 @@ export class AstriaApiClient {
             return result;
         } catch (error: any) {
             const astriaError = createErrorFromResponse(error);
-            if (FEATURES.LOG_ERRORS) {
-                console.error(`[${astriaError.code}] Failed to generate image:`, astriaError);
-            }
+
             throw astriaError;
         }
     }
 
-    // Polls the API until the prompt generation is complete or times out
-    // Used internally by generateImage when images aren't immediately available
+
     private async pollForPromptCompletion(
         tuneId: number,
         promptId: number,
@@ -164,37 +152,19 @@ export class AstriaApiClient {
         let attempts = 0;
 
         while (attempts < maxAttempts) {
-            try {
-                if (FEATURES.LOG_ERRORS) {
-                    console.log(`Polling for prompt completion: attempt ${attempts + 1}/${maxAttempts}`);
-                }
+            const response = await this.axiosInstance.get(`/tunes/${tuneId}/prompts/${promptId}`);
+            const result = response.data;
 
-                const response = await this.axiosInstance.get(`/tunes/${tuneId}/prompts/${promptId}`);
-                const result = response.data;
-
-                if (result.images && result.images.length > 0) {
-                    if (FEATURES.LOG_ERRORS) {
-                        console.log(`Images are ready: ${result.images.length} images generated`);
-                    }
-                    return result;
-                }
-
-                if (attempts > 10 && result.error) {
-                    if (FEATURES.LOG_ERRORS) {
-                        console.log(`Error detected in prompt: ${result.error}`);
-                    }
-                    return result;
-                }
-
-                await new Promise(resolve => setTimeout(resolve, delayMs));
-                attempts++;
-            } catch (error) {
-                const astriaError = createErrorFromResponse(error);
-                if (FEATURES.LOG_ERRORS) {
-                    console.error(`[${astriaError.code}] Failed to poll for prompt completion:`, astriaError);
-                }
-                throw astriaError;
+            if (result.images && result.images.length > 0) {
+                return result;
             }
+
+            if (attempts > 10 && result.error) {
+                return result;
+            }
+
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+            attempts++;
         }
 
         throw new AstriaError(
@@ -204,8 +174,7 @@ export class AstriaApiClient {
         );
     }
 
-    // Lists all prompts for a specific tune
-    // Supports pagination with the offset parameter
+
     async listPrompts(tuneId: number, offset?: number): Promise<any[]> {
         try {
             const params = offset !== undefined ? { offset } : {};
@@ -213,30 +182,24 @@ export class AstriaApiClient {
             return response.data;
         } catch (error: any) {
             const astriaError = createErrorFromResponse(error);
-            if (FEATURES.LOG_ERRORS) {
-                console.error(`[${astriaError.code}] Failed to list prompts:`, astriaError);
-            }
+
             throw astriaError;
         }
     }
 
-    // Retrieves detailed information about a specific prompt
-    // Includes the prompt text, status, and generated images
+
     async retrievePrompt(tuneId: number, promptId: number): Promise<any> {
         try {
             const response = await this.axiosInstance.get(`/tunes/${tuneId}/prompts/${promptId}`);
             return response.data;
         } catch (error: any) {
             const astriaError = createErrorFromResponse(error);
-            if (FEATURES.LOG_ERRORS) {
-                console.error(`[${astriaError.code}] Failed to retrieve prompt:`, astriaError);
-            }
+
             throw astriaError;
         }
     }
 
-    // Determines the MIME type based on a file extension
-    // Used when uploading images for fine-tuning
+
     private getMimeTypeFromFilename(filename: string): string {
         const ext = filename.toLowerCase().split('.').pop();
         switch (ext) {
@@ -255,5 +218,5 @@ export class AstriaApiClient {
     }
 }
 
-// Export a singleton instance of the API client
+
 export const astriaApi = new AstriaApiClient();

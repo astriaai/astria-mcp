@@ -1,6 +1,6 @@
-import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { MODELS, FEATURES, STORAGE } from './config.js';
+import { MODELS } from './config.js';
 import { ensureDirectoriesExist } from './utils/file-system.js';
 import {
     CreateTuneRawSchema,
@@ -66,17 +66,13 @@ async function main() {
     try {
         console.error("Starting Astria MCP Server...");
 
-        // Initialize file system directories
-        try {
-            ensureDirectoriesExist();
-            if (FEATURES.LOG_ERRORS) {
-                console.error(`Storage directory: ${STORAGE.IMAGE_DIRECTORY}`);
-                console.error(`Tune images directory: ${STORAGE.IMAGE_DIRECTORY}/${STORAGE.TUNE_IMAGES_SUBDIRECTORY}`);
-            }
-        } catch (initError: any) {
-            console.error(`Failed to initialize directories: ${initError.message}`);
-            // Continue anyway - we'll fall back to URL-only mode
+        // Initialize directories and log the result
+        const directoriesInitialized = ensureDirectoriesExist();
+        if (!directoriesInitialized) {
+            console.error("Failed to initialize directories - falling back to URL-only mode");
         }
+
+        console.error("Directories initialized:", directoriesInitialized);
 
         const transport = new StdioServerTransport();
         await server.connect(transport);
