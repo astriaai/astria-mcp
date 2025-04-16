@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { TextContent } from '@modelcontextprotocol/sdk/types.js';
 import { astriaApi } from '../api/client';
 import { handleMcpError } from '../errors/index.js';
+import { TuneInfo } from '../api/types';
 
 export const ListTunesRawSchema = {
     offset: z.number().int().min(0).optional().describe("Starting offset for the list (page size is 20). Default 0.")
@@ -14,12 +15,24 @@ export type ListTunesInput = z.infer<typeof ListTunesSchema>;
 export async function handleListTunes(params: any): Promise<any> {
     try {
         const parsedParams = ListTunesSchema.parse(params);
-        const result = await astriaApi.listTunes(parsedParams.offset);
+        const tunes = await astriaApi.listTunes(parsedParams.offset);
+
+        // Format the tunes data to show only important information
+        const formattedTunes = tunes.map((tune: TuneInfo) => ({
+            id: tune.id,
+            title: tune.title,
+            name: tune.name,
+            status: tune.trained_at ? 'Trained' : tune.started_training_at ? 'Training' : 'Queued',
+            model_type: tune.model_type || 'N/A',
+            branch: tune.branch || 'N/A',
+            token: tune.token || 'None',
+            created_at: new Date(tune.created_at).toLocaleDateString()
+        }));
 
         return {
             content: [{
                 type: "text",
-                text: JSON.stringify(result, null, 2),
+                text: `Found ${formattedTunes.length} tunes:\n\n${JSON.stringify(formattedTunes, null, 2)}`,
             } as TextContent],
         };
     } catch (error: any) {
