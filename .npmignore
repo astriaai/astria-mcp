@@ -1,0 +1,28 @@
+# Source files
+src/
+
+# TypeScript config
+tsconfig.json
+
+# Development files
+.git/
+.github/
+.vscode/
+node_modules/
+.env
+.env.*
+*.log
+.DS_Store
+
+# Test files
+test/
+tests/
+__tests__/
+*.test.ts
+*.spec.ts
+
+# Misc
+.editorconfig
+.eslintrc
+.prettierrc
+.gitignore
