@@ -7,7 +7,6 @@ import { TextContent, ImageContent, ReadResourceResult } from "@modelcontextprot
 // Import functions from the SDK using .js extension for ES Modules
 import {
     createTune,
-    listTunes,
     retrieveTune,
     retrievePrompt,
     generateImage,
@@ -176,69 +175,32 @@ server.tool(
     }
 );
 
-// Tool 2: List Tunes
-const ListTunesRawSchema = {
-    offset: z.number().int().min(0).optional().describe("Starting offset for the list (page size is 20). Default 0."),
+// Tool 2: Image Generation
+const ImageRawSchema = {
+    text: z.string().describe("Text description of the desired image"),
+    tune: z.string().optional().describe("Name of the LoRA tune/subject to apply if found in the LoRA tune list."),
+    aspect: z.enum(['square', 'portrait', 'landscape']).optional().default('square').describe("Aspect ratio of the generated image")
 };
-const ListTunesInputValidator = z.object(ListTunesRawSchema);
-
-server.tool(
-    "list_tunes",
-    "Lists the user's Astria fine-tunes.",
-    ListTunesRawSchema,
-    async (params) => {
-        try {
-            const parsedParams = ListTunesInputValidator.parse(params);
-            console.error(`MCP Tool Call: list_tunes with offset=${parsedParams.offset}`);
-
-            // Call the SDK function
-            const result = await listTunes(parsedParams.offset);
-
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify(result, null, 2),
-                } as TextContent],
-            };
-        } catch (error: any) {
-            return handleToolError(error, 'listing tunes');
-        }
-    }
-);
-
-
-// Tool 3: Generate Image (Removed create_prompt as it's redundant)
-
-const GenerateImageRawSchema = {
-    prompt: z.string().describe("Text description of the desired image"),
-    lora_tunes: z.array(z.object({
-        tune_id: z.number().int().positive().describe("ID of the LoRA tune to apply"),
-        weight: z.number().min(0.1).max(1.0).default(1.0).describe("Weight/strength of the LoRA effect (0.1-1.0)")
-    })).optional().describe("Optional array of LoRA tunes to apply"),
-    width: z.number().int().min(512).max(2048).default(1024).describe("Image width in pixels (512-2048)"),
-    height: z.number().int().min(512).max(2048).default(1024).describe("Image height in pixels (512-2048)"),
-    guidance_scale: z.number().min(1).max(20).default(7.5).describe("How closely to follow the prompt (1-20)"),
-    num_images: z.number().int().min(1).max(4).default(1).describe("Number of images to generate (1-4)"),
-    super_resolution: z.boolean().default(true).describe("Apply super-resolution enhancement"),
-    inpaint_faces: z.boolean().default(true).describe("Apply face inpainting/enhancement"),
-    seed: z.number().int().optional().describe("Random seed for reproducible results")
-};
-const GenerateImageInputValidator = z.object(GenerateImageRawSchema);
+const ImageInputValidator = z.object(ImageRawSchema);
 
 server.tool(
     "generate_image",
-    "Generate high-quality images using Astria's models. Using the flux model. Supports optional Flux LoRA fine-tunes when using the Flux model (LoRAs must be used with their compatible base model).",
-    GenerateImageRawSchema,
+    "Generate an image with Astria. Just provide text and optionally a LoRA tune or subject name to use with inbuilt lora confirmation.",
+    ImageRawSchema,
     async (params) => {
         try {
-            const parsedParams = GenerateImageInputValidator.parse(params);
+            const parsedParams = ImageInputValidator.parse(params);
 
-            console.error(`MCP Tool Call: generate_image with prompt=${parsedParams.prompt}`);
+            const imageParams = {
+                prompt: parsedParams.text,
+                tune_title: parsedParams.tune,
+                aspect_ratio: parsedParams.aspect
+            };
 
-            // Call the SDK function
-            const result = await generateImage(parsedParams);
+            console.error(`MCP Tool Call: image with text=${parsedParams.text}${parsedParams.tune ? `, tune=${parsedParams.tune}` : ''}`);
 
-            // Format the response with images displayed in chat
+            const result = await generateImage(imageParams);
+
             const imageContents = [];
 
             if (result.images && result.images.length > 0) {
@@ -251,26 +213,26 @@ server.tool(
                     // Convert to base64
                     const base64Data = response.data.toString('base64');
 
-                    // Add as image content if it's not too large
-                    if (base64Data.length < 512000 ) {
-                        imageContents.push({
-                            type: "image",
-                            data: base64Data,
-                            mimeType: "image/jpeg"
-                        } as ImageContent);
-                    }
+                    // Add as image content
+                    imageContents.push({
+                        type: "image",
+                        data: base64Data,
+                        mimeType: "image/jpeg",
+                    } as ImageContent);
 
                     // Add the direct URL as text for easy access
                     imageContents.push({
                         type: "text",
-                        text: `GENERATED IMAGE URL: ${imageUrl}`
+                        text: `[generated image url](${imageUrl})`,
+                        annotations: {
+                            format: 'markdown'
+                        },
                     } as TextContent);
                 }
-            }
-            else {
+            } else {
                 imageContents.push({
                     type: "text",
-                    text: "No images were generated. try again"
+                    text: "No images were generated. Try again with a different prompt or tune name."
                 } as TextContent);
             }
 

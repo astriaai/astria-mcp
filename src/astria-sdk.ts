@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import dotenv from 'dotenv';
+import { TuneResponse, PromptResponse, ImageGenerationParams, ImageGenerationResult } from './types';
 
 dotenv.config();
 
@@ -33,8 +34,6 @@ const axiosInstance: AxiosInstance = axios.create({
     timeout: CONFIG.API.TIMEOUT_MS,
 });
 
-// Error handling is implemented in the axios response interceptor
-
 // Request interceptor for logging API calls
 axiosInstance.interceptors.request.use(request => {
     console.error(`-> SDK Request: ${request.method?.toUpperCase()} ${request.url}`);
@@ -57,31 +56,17 @@ axiosInstance.interceptors.response.use(
 
         // Extract and format error details for improved diagnostics
         let errorMessage = 'Unknown error occurred';
-        let context = error.config?.url ? `API call to ${error.config.url}` : 'API call';
 
         if (error.response) {
-            // Map HTTP status codes to appropriate error messages
-            if (error.response.status === 404) {
-                errorMessage = 'Resource not found';
-            } else if (error.response.status === 401 || error.response.status === 403) {
-                errorMessage = 'Authentication error - check your API key';
-            } else if (error.response.status === 422) {
-                errorMessage = 'Validation error - check your request parameters';
-            } else if (error.response.status === 429) {
-                errorMessage = 'Rate limit exceeded - try again later';
-            }
-
             // Extract detailed error information from response payload
             if (error.response.data) {
                 if (typeof error.response.data === 'string') {
                     errorMessage = error.response.data;
                 } else if (typeof error.response.data === 'object') {
                     const data = error.response.data as any;
-                    if (data.message) {
-                        errorMessage = data.message;
-                    } else if (data.error) {
-                        errorMessage = data.error;
-                    }
+                    errorMessage = Object.entries(data).map(
+                        ([key, value]) => `${key}: ${typeof value === 'string' ? value : Array.isArray(value) ? value.join(' ') : 'unsupported format'}`
+                    ).join(" ");
                 }
             }
         } else if (error.request) {
@@ -93,7 +78,7 @@ axiosInstance.interceptors.response.use(
         }
 
         // Construct error with contextual information
-        const enhancedError = new Error(`${context}: ${errorMessage}`);
+        const enhancedError = new Error(`${errorMessage}`);
         return Promise.reject(enhancedError);
     }
 );
@@ -105,7 +90,7 @@ axiosInstance.interceptors.response.use(
  * @param tuneData - The tune creation payload
  * @returns API response with tune details
  */
-export async function createTune(tuneData: Record<string, any>): Promise<any> {
+export async function createTune(tuneData: Record<string, any>): Promise<TuneResponse> {
     // Validate tune object existence
     if (!tuneData.tune) {
         throw new Error("Missing tune object in request data");
@@ -117,12 +102,16 @@ export async function createTune(tuneData: Record<string, any>): Promise<any> {
 
 /**
  * Retrieves a paginated list of user's fine-tunes
+ * @param searchTitle - Optional title to search for
  * @param offset - Optional pagination offset
  * @returns API response with tunes list
  */
-export async function listTunes(offset?: number): Promise<any> {
-    const params = offset !== undefined ? { offset } : {};
-    const response = await axiosInstance.get('/tunes', { params });
+export async function listTunes(searchTitle?: string, offset?: number): Promise<TuneResponse[]> {
+    const params: Record<string, any> = {};
+    if (offset !== undefined) params.offset = offset;
+    if (searchTitle) params.title = searchTitle;
+
+    const response = await axiosInstance.get('/tunes?branch=flux1&model_type=lora', { params });
     return response.data;
 }
 
@@ -130,20 +119,45 @@ export async function listTunes(offset?: number): Promise<any> {
  * Retrieves a specific Astria fine-tune by its ID.
  * @param tuneId - The ID of the tune to retrieve.
  */
-export async function retrieveTune(tuneId: number): Promise<any> {
+export async function retrieveTune(tuneId: number): Promise<TuneResponse> {
     const response = await axiosInstance.get(`/tunes/${tuneId}`);
     return response.data;
 }
-
 
 /**
  * Creates a new prompt for the Flux base tune ID.
  * @param promptData - The prompt creation payload.
  */
-export async function createPrompt(promptData: Record<string, any>): Promise<any> {
-    const path = `/tunes/${CONFIG.MODELS.FLUX.ID}/prompts`;
-    const response = await axiosInstance.post(path, promptData);
-    return response.data;
+export async function createPrompt(promptData: Record<string, any>): Promise<PromptResponse> {
+    const tuneId = CONFIG.MODELS.FLUX.ID;
+    const response = await axiosInstance.post(`/tunes/${tuneId}/prompts`, promptData);
+    let result: PromptResponse = response.data;
+
+    // Poll if needed
+    if (result.id && (!result.images || result.images.length === 0)) {
+        // Poll up to 120 times with a 3-second delay (total 360 seconds)
+        const maxPolls = 120;
+        let pollCount = 0;
+
+        while (pollCount < maxPolls) {
+            if (result.images && result.images.length > 0) break;
+            if (result.error) throw new Error(result.error);
+            if (result.status === 'failed') throw new Error('Prompt processing failed');
+
+            // Introduce delay between polling attempts
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            pollCount++;
+
+            const pollResponse = await axiosInstance.get(`/tunes/${tuneId}/prompts/${result.id}`);
+            result = pollResponse.data;
+        }
+
+        if (!result.images || result.images.length === 0) {
+            throw new Error(result.error || 'Prompt processing timed out');
+        }
+    }
+
+    return result;
 }
 
 /**
@@ -151,45 +165,80 @@ export async function createPrompt(promptData: Record<string, any>): Promise<any
  * @param tuneId - The ID of the tune the prompt belongs to.
  * @param promptId - The ID of the prompt to retrieve.
  */
-export async function retrievePrompt(tuneId: number, promptId: number): Promise<any> {
+export async function retrievePrompt(tuneId: number, promptId: number): Promise<PromptResponse> {
     const response = await axiosInstance.get(`/tunes/${tuneId}/prompts/${promptId}`);
     return response.data;
 }
 
 /**
- * Validates a LoRA tune to ensure it exists, is trained, and is a LoRA type.
- * @param tuneId - The ID of the LoRA tune to validate.
+ * Finds a LoRA tune by title (partial match)
+ * @param searchTitle - The title to search for
+ * @returns The tune info or null if not found
  */
-export async function validateLoraTune(tuneId: number): Promise<any> {
-    const tuneInfo = await retrieveTune(tuneId);
+export async function findTuneByTitle(searchTitle: string): Promise<TuneResponse | null> {
+    if (!searchTitle) return null;
 
-    // Quick validation of essential requirements
-    if (!tuneInfo.trained_at) {
-        throw new Error(`LoRA tune with ID ${tuneId} is not trained yet`);
-    }
-    if (tuneInfo.model_type !== 'lora') {
-        throw new Error(`Tune with ID ${tuneId} is not a LoRA type`);
-    }
+    const tunes = await listTunes(searchTitle);
+    if (!tunes || !tunes.length) return null;
 
-    return tuneInfo;
+    // Find the first trained LoRA that matches the search title (case insensitive)
+    const searchLower = searchTitle.toLowerCase();
+    const matchingTune = tunes.find((tune: TuneResponse) =>
+        tune.trained_at &&
+        tune.title.toLowerCase().includes(searchLower)
+    );
+
+    return matchingTune || null;
 }
 
 /**
  * Generates images using the Flux model with optional LoRA fine-tunes.
  * @param params - The image generation parameters.
  */
-export async function generateImage(params: Record<string, any>): Promise<any> {
-    // Apply LoRA fine-tuning to prompt if specified
+export async function generateImage(params: ImageGenerationParams): Promise<ImageGenerationResult> {
     let promptText = params.prompt;
-    if (params.lora_tunes?.length > 0) {
-        for (const lora of params.lora_tunes) {
-            // Validate the LoRA
-            const tuneInfo = await validateLoraTune(lora.tune_id);
+    if (params.tune_title) {
+        const isNotExpired = (tune: TuneResponse): boolean =>
+            !tune.expires_at || new Date(tune.expires_at) > new Date();
 
-            // Add token if needed
-            if (tuneInfo.token) {
-                promptText = `${tuneInfo.token} ${tuneInfo.name} ${promptText}`;
-            }
+        const tuneInfo = await findTuneByTitle(params.tune_title);
+        const isValid = tuneInfo && isNotExpired(tuneInfo);
+
+        if (!isValid) {
+            const availableTunes = (await listTunes())
+                .filter(tune => tune.trained_at && isNotExpired(tune))
+                .map(tune => tune.title);
+
+            const errorMsg = tuneInfo
+                ? `${tuneInfo.title} LoRA is expired`
+                : `${params.tune_title} LoRA not found`;
+
+            throw new Error(`${errorMsg}. Available LoRA tunes: ${availableTunes.map(tune => `"${tune}"`).join(', ')}`);
+        }
+
+        // Apply LoRA settings to prompt
+        if (tuneInfo.id) {
+            promptText = `<lora:${tuneInfo.id}:1.0> ${promptText}`;
+        }
+
+        if (tuneInfo.token) {
+            promptText = `${tuneInfo.token} ${tuneInfo.name} ${promptText}`;
+        }
+    }
+
+    // Construct width and height from aspect ratio param
+    let width = params.width || 512;
+    let height = params.height || 512;
+
+    if (params.aspect_ratio) {
+        if (params.aspect_ratio === 'square') {
+            width = height = 512;
+        } else if (params.aspect_ratio === 'landscape') {
+            width = 642;
+            height = 512;
+        } else if (params.aspect_ratio === 'portrait') {
+            width = 512;
+            height = 642;
         }
     }
 
@@ -197,43 +246,20 @@ export async function generateImage(params: Record<string, any>): Promise<any> {
     const requestData = {
         prompt: {
             text: promptText,
-            super_resolution: params.super_resolution !== false,
-            inpaint_faces: params.inpaint_faces !== false,
-            width: params.width,
-            height: params.height,
-            num_images: params.num_images,
-            guidance_scale: params.guidance_scale,
+            super_resolution: true,
+            width,
+            height,
+            num_images: params.num_images || 1,
             seed: params.seed
         }
     };
 
-    // Make API request
-    const response = await axiosInstance.post(`/tunes/${CONFIG.MODELS.FLUX.ID}/prompts`, requestData);
-    let result = response.data;
+    const result = await createPrompt(requestData);
 
-    // Implement polling mechanism for asynchronous image generation
-    if (result.id && (!result.images || result.images.length === 0)) {
-        // Poll up to 60 times with a 2-second delay (total 2 minutes)
-        const maxPolls = 60;
-        let pollCount = 0;
-
-        while (pollCount < maxPolls && (!result.images || result.images.length === 0)) {
-            // Introduce delay between polling attempts
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            pollCount++;
-            const pollResponse = await axiosInstance.get(`/tunes/${CONFIG.MODELS.FLUX.ID}/prompts/${result.id}`);
-            result = pollResponse.data;
-        }
-
-        if (!result.images || result.images.length === 0) {
-            throw new Error(result.error || 'Image generation timed out');
-        }
-    }
-
-    // Format response for client consumption
     return {
         id: result.id,
         prompt: result.text,
-        images: result.images || [],
+        images: result.images,
+        error: result.error
     };
 }
