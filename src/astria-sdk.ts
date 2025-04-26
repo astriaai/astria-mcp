@@ -1,6 +1,6 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import dotenv from 'dotenv';
-import { TuneResponse, PromptResponse, ImageGenerationParams, ImageGenerationResult } from './types';
+import { TuneResponse, PromptResponse, ImageGenerationParams, ImageGenerationResult, TuneSearchResult } from './types';
 
 dotenv.config();
 
@@ -171,24 +171,38 @@ export async function retrievePrompt(tuneId: number, promptId: number): Promise<
 }
 
 /**
- * Finds a LoRA tune by title (partial match)
+ * Finds a non-expired LoRA tune by title (partial match) and provides available tunes
  * @param searchTitle - The title to search for
- * @returns The tune info or null if not found
+ * @returns Object containing the matching tune (or null) and a list of available tunes
  */
-export async function findTuneByTitle(searchTitle: string): Promise<TuneResponse | null> {
-    if (!searchTitle) return null;
+export async function findTuneByTitle(searchTitle: string): Promise<TuneSearchResult> {
+    // Helper function to check if a tune is not expired
+    const isNotExpired = (tune: TuneResponse): boolean =>
+        !tune.expires_at || new Date(tune.expires_at) > new Date();
 
-    const tunes = await listTunes(searchTitle);
-    if (!tunes || !tunes.length) return null;
+    // Get all available non-expired tunes
+    const allTunes = await listTunes();
+    const validTunes = allTunes.filter(tune => tune.trained_at && isNotExpired(tune));
+    const availableTuneNames = validTunes.map(tune => tune.title);
 
-    // Find the first trained LoRA that matches the search title (case insensitive)
+    // If no search title provided, just return available tunes with no match
+    if (!searchTitle) {
+        return { tune: null, availableTunes: availableTuneNames };
+    }
+
+    // Find trained and non-expired loras that include the search term
     const searchLower = searchTitle.toLowerCase();
-    const matchingTune = tunes.find((tune: TuneResponse) =>
-        tune.trained_at &&
+    const matchingTunes = validTunes.filter(tune =>
         tune.title.toLowerCase().includes(searchLower)
     );
 
-    return matchingTune || null;
+    if (matchingTunes.length > 1) {
+        throw new Error(`Multiple LoRA tunes found with the title "${searchTitle}". Please specify the exact title of the LoRA tune you want from the following ${matchingTunes.map(tune => `"${tune.title}"`).join(', ')}`);
+    } else if (matchingTunes.length === 1) {
+        return { tune: matchingTunes[0], availableTunes: availableTuneNames };
+    } else {
+        return { tune: null, availableTunes: availableTuneNames };
+    }
 }
 
 /**
@@ -198,32 +212,22 @@ export async function findTuneByTitle(searchTitle: string): Promise<TuneResponse
 export async function generateImage(params: ImageGenerationParams): Promise<ImageGenerationResult> {
     let promptText = params.prompt;
     if (params.tune_title) {
-        const isNotExpired = (tune: TuneResponse): boolean =>
-            !tune.expires_at || new Date(tune.expires_at) > new Date();
+        const { tune, availableTunes } = await findTuneByTitle(params.tune_title);
 
-        const tuneInfo = await findTuneByTitle(params.tune_title);
-        const isValid = tuneInfo && isNotExpired(tuneInfo);
-
-        if (!isValid) {
-            const availableTunes = (await listTunes())
-                .filter(tune => tune.trained_at && isNotExpired(tune))
-                .map(tune => tune.title);
-
-            const errorMsg = tuneInfo
-                ? `${tuneInfo.title} LoRA is expired`
-                : `${params.tune_title} LoRA not found`;
-
-            throw new Error(`${errorMsg}. Available LoRA tunes: ${availableTunes.map(tune => `"${tune}"`).join(', ')}`);
+        if (!tune) {
+            throw new Error(`${params.tune_title} LoRA not found or expired. Available LoRA tunes: ${availableTunes.map(tune => `"${tune}"`).join(', ')}`);
         }
 
         // Apply LoRA settings to prompt
-        if (tuneInfo.id) {
-            promptText = `<lora:${tuneInfo.id}:1.0> ${promptText}`;
+        if (tune.id || tune.token) {
+            // Add LoRA ID tag if available
+            const loraTag = tune.id ? `<lora:${tune.id}:1.0> ` : '';
+            // Add token and name if available
+            const tokenName = tune.token ? `${tune.token} ${tune.name} ` : '';
+            // Combine everything
+            promptText = `${loraTag}${tokenName}${promptText}`;
         }
 
-        if (tuneInfo.token) {
-            promptText = `${tuneInfo.token} ${tuneInfo.name} ${promptText}`;
-        }
     }
 
     // Construct width and height from aspect ratio param

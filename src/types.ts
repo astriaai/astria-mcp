@@ -77,3 +77,8 @@ export interface ImageGenerationResult {
     images: string[];
     error?: string;
 }
+
+export interface TuneSearchResult {
+    tune: TuneResponse | null;
+    availableTunes: string[];
+}
