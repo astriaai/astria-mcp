@@ -11,7 +11,7 @@ import {
     retrievePrompt,
     generateImage,
     CONFIG
-} from "./astria-sdk.js";
+} from "./astria-sdk";
 import axios from 'axios';
 
 // --- MCP Server Setup ---

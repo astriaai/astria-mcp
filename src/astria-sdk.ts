@@ -1,4 +1,5 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
+import * as AxiosLogger from 'axios-logger';
 import dotenv from 'dotenv';
 import { TuneResponse, PromptResponse, ImageGenerationParams, ImageGenerationResult, TuneSearchResult } from './types';
 
@@ -33,6 +34,8 @@ const axiosInstance: AxiosInstance = axios.create({
     },
     timeout: CONFIG.API.TIMEOUT_MS,
 });
+instance.interceptors.request.use(AxiosLogger.requestLogger);
+
 
 // Request interceptor for logging API calls
 axiosInstance.interceptors.request.use(request => {
@@ -181,7 +184,7 @@ export async function findTuneByTitle(searchTitle: string): Promise<TuneSearchRe
         !tune.expires_at || new Date(tune.expires_at) > new Date();
 
     // Get all available non-expired tunes
-    const allTunes = await listTunes();
+    const allTunes = await listTunes(searchTitle);
     const validTunes = allTunes.filter(tune => tune.trained_at && isNotExpired(tune));
     const availableTuneNames = validTunes.map(tune => tune.title);
 
@@ -231,18 +234,17 @@ export async function generateImage(params: ImageGenerationParams): Promise<Imag
     }
 
     // Construct width and height from aspect ratio param
-    let width = params.width || 512;
-    let height = params.height || 512;
-
+    let width = null;
+    let height = null;
     if (params.aspect_ratio) {
         if (params.aspect_ratio === 'square') {
-            width = height = 512;
+            width = height = 1024;
         } else if (params.aspect_ratio === 'landscape') {
-            width = 642;
-            height = 512;
+            width = 1280;
+            height = 720;
         } else if (params.aspect_ratio === 'portrait') {
-            width = 512;
-            height = 642;
+            width = 720;
+            height = 1280;
         }
     }
 
@@ -251,10 +253,11 @@ export async function generateImage(params: ImageGenerationParams): Promise<Imag
         prompt: {
             text: promptText,
             super_resolution: true,
+            inpaint_faces: !!params.tune_title,
             width,
             height,
             num_images: params.num_images || 1,
-            seed: params.seed
+            seed: -1
         }
     };
 

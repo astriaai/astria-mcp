@@ -65,9 +65,6 @@ export interface ImageGenerationParams {
     prompt: string;
     tune_title?: string;
     aspect_ratio?: 'square' | 'landscape' | 'portrait';
-    width?: number;
-    height?: number;
-    seed?: number;
     num_images?: number;
 }
 
