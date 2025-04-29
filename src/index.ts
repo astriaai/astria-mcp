@@ -178,14 +178,14 @@ server.tool(
 // Tool 2: Image Generation
 const ImageRawSchema = {
     text: z.string().describe("Text description of the desired image"),
-    tune: z.string().optional().describe("Name of the LoRA tune/subject to apply if found in the LoRA tune list."),
+    tune: z.string().optional().describe(`Name of the LoRA tune to apply.`),
     aspect: z.enum(['square', 'portrait', 'landscape']).optional().default('square').describe("Aspect ratio of the generated image")
 };
 const ImageInputValidator = z.object(ImageRawSchema);
 
 server.tool(
     "generate_image",
-    "Generate an image with Astria. Just provide text and optionally a LoRA tune or subject name to use with inbuilt lora confirmation.",
+    "Generate an image with Astria.",
     ImageRawSchema,
     async (params) => {
         try {
@@ -203,38 +203,24 @@ server.tool(
 
             const imageContents = [];
 
-            if (result.images && result.images.length > 0) {
-                for (let i = 0; i < result.images.length; i++) {
-                    const imageUrl = result.images[i];
+            // Fetch the image
+            const response = await axios.get(result.image, { responseType: 'arraybuffer' });
 
-                    // Fetch the image
-                    const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+            // Convert to base64
+            const base64Data = response.data.toString('base64');
 
-                    // Convert to base64
-                    const base64Data = response.data.toString('base64');
+            // Add as image content
+            imageContents.push({
+                type: "image",
+                data: base64Data,
+                mimeType: "image/jpeg",
+            } as ImageContent);
 
-                    // Add as image content
-                    imageContents.push({
-                        type: "image",
-                        data: base64Data,
-                        mimeType: "image/jpeg",
-                    } as ImageContent);
-
-                    // Add the direct URL as text for easy access
-                    imageContents.push({
-                        type: "text",
-                        text: `[generated image url](${imageUrl})`,
-                        annotations: {
-                            format: 'markdown'
-                        },
-                    } as TextContent);
-                }
-            } else {
-                imageContents.push({
-                    type: "text",
-                    text: "No images were generated. Try again with a different prompt or tune name."
-                } as TextContent);
-            }
+            // Add the direct URL as text for easy access
+            imageContents.push({
+                type: "text",
+                text: `Generated image URL: ${result.image}`,
+            } as TextContent);
 
             return {
                 content: imageContents,

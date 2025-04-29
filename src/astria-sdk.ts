@@ -1,7 +1,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import * as AxiosLogger from 'axios-logger';
 import dotenv from 'dotenv';
-import { TuneResponse, PromptResponse, ImageGenerationParams, ImageGenerationResult, TuneSearchResult } from './types';
+import { TuneResponse, PromptResponse, ImageGenerationParams, ImageGenerationResult } from './types';
 
 dotenv.config();
 
@@ -34,55 +34,22 @@ const axiosInstance: AxiosInstance = axios.create({
     },
     timeout: CONFIG.API.TIMEOUT_MS,
 });
-instance.interceptors.request.use(AxiosLogger.requestLogger);
 
-
-// Request interceptor for logging API calls
-axiosInstance.interceptors.request.use(request => {
-    console.error(`-> SDK Request: ${request.method?.toUpperCase()} ${request.url}`);
-    if (request.data) {
-        console.error(`   Request Body Preview: ${JSON.stringify(request.data).substring(0, 200)}...`);
-    }
-    return request;
-});
+axiosInstance.interceptors.request.use(AxiosLogger.requestLogger);
 
 // Response interceptor - handles error parsing and transformation
 axiosInstance.interceptors.response.use(
-    // Success handler
-    response => {
-        console.error(`<- SDK Response: ${response.config.method?.toUpperCase()} ${response.config.url} Status: ${response.status}`);
-        return response;
-    },
-    // Error handler
+    AxiosLogger.responseLogger,
     (error: AxiosError) => {
-        console.error(`<- SDK Error: ${error.config?.method?.toUpperCase()} ${error.config?.url} Status: ${error.response?.status}`);
+        const errorMessage = error.response?.data
+            ? (typeof error.response.data === 'string'
+                ? error.response.data
+                : Object.entries(error.response.data as Record<string, any>)
+                    .map(([k, v]) => `${k}: ${String(v)}`)
+                    .join(' '))
+            : error.message || 'Unknown error occurred';
 
-        // Extract and format error details for improved diagnostics
-        let errorMessage = 'Unknown error occurred';
-
-        if (error.response) {
-            // Extract detailed error information from response payload
-            if (error.response.data) {
-                if (typeof error.response.data === 'string') {
-                    errorMessage = error.response.data;
-                } else if (typeof error.response.data === 'object') {
-                    const data = error.response.data as any;
-                    errorMessage = Object.entries(data).map(
-                        ([key, value]) => `${key}: ${typeof value === 'string' ? value : Array.isArray(value) ? value.join(' ') : 'unsupported format'}`
-                    ).join(" ");
-                }
-            }
-        } else if (error.request) {
-            // Request was made but no response received
-            errorMessage = 'No response received from server - check your network connection';
-        } else {
-            // Error in setting up the request
-            errorMessage = error.message || 'Error setting up the request';
-        }
-
-        // Construct error with contextual information
-        const enhancedError = new Error(`${errorMessage}`);
-        return Promise.reject(enhancedError);
+        return Promise.reject(new Error(errorMessage));
     }
 );
 
@@ -174,38 +141,22 @@ export async function retrievePrompt(tuneId: number, promptId: number): Promise<
 }
 
 /**
- * Finds a non-expired LoRA tune by title (partial match) and provides available tunes
+ * Finds a LoRA tune by title (partial match)
  * @param searchTitle - The title to search for
- * @returns Object containing the matching tune (or null) and a list of available tunes
+ * @returns The tune info or null if not found
  */
-export async function findTuneByTitle(searchTitle: string): Promise<TuneSearchResult> {
-    // Helper function to check if a tune is not expired
-    const isNotExpired = (tune: TuneResponse): boolean =>
-        !tune.expires_at || new Date(tune.expires_at) > new Date();
+export async function findTuneByTitle(searchTitle: string): Promise<TuneResponse | null> {
+    if (!searchTitle) return null;
 
-    // Get all available non-expired tunes
-    const allTunes = await listTunes(searchTitle);
-    const validTunes = allTunes.filter(tune => tune.trained_at && isNotExpired(tune));
-    const availableTuneNames = validTunes.map(tune => tune.title);
+    const tunes = await listTunes(searchTitle);
+    if (!tunes || !tunes.length) return null;
 
-    // If no search title provided, just return available tunes with no match
-    if (!searchTitle) {
-        return { tune: null, availableTunes: availableTuneNames };
-    }
-
-    // Find trained and non-expired loras that include the search term
-    const searchLower = searchTitle.toLowerCase();
-    const matchingTunes = validTunes.filter(tune =>
-        tune.title.toLowerCase().includes(searchLower)
+    // Find the first tune that is trained
+    const matchingTune = tunes.find((tune: TuneResponse) =>
+        tune.trained_at
     );
 
-    if (matchingTunes.length > 1) {
-        throw new Error(`Multiple LoRA tunes found with the title "${searchTitle}". Please specify the exact title of the LoRA tune you want from the following ${matchingTunes.map(tune => `"${tune.title}"`).join(', ')}`);
-    } else if (matchingTunes.length === 1) {
-        return { tune: matchingTunes[0], availableTunes: availableTuneNames };
-    } else {
-        return { tune: null, availableTunes: availableTuneNames };
-    }
+    return matchingTune || null;
 }
 
 /**
@@ -214,20 +165,24 @@ export async function findTuneByTitle(searchTitle: string): Promise<TuneSearchRe
  */
 export async function generateImage(params: ImageGenerationParams): Promise<ImageGenerationResult> {
     let promptText = params.prompt;
+
     if (params.tune_title) {
-        const { tune, availableTunes } = await findTuneByTitle(params.tune_title);
+
+        const tune = await findTuneByTitle(params.tune_title);
 
         if (!tune) {
-            throw new Error(`${params.tune_title} LoRA not found or expired. Available LoRA tunes: ${availableTunes.map(tune => `"${tune}"`).join(', ')}`);
+            throw new Error(`${params.tune_title} LoRA not found.`);
         }
 
-        // Apply LoRA settings to prompt
+        // check if the tune is expired
+        if (!tune.expires_at || new Date(tune.expires_at) > new Date()) {
+            throw new Error(`${tune.title} LoRA is expired.`);
+        }
+
+        // Apply LoRA settings and token to prompt
         if (tune.id || tune.token) {
-            // Add LoRA ID tag if available
             const loraTag = tune.id ? `<lora:${tune.id}:1.0> ` : '';
-            // Add token and name if available
             const tokenName = tune.token ? `${tune.token} ${tune.name} ` : '';
-            // Combine everything
             promptText = `${loraTag}${tokenName}${promptText}`;
         }
 
@@ -256,7 +211,7 @@ export async function generateImage(params: ImageGenerationParams): Promise<Imag
             inpaint_faces: !!params.tune_title,
             width,
             height,
-            num_images: params.num_images || 1,
+            num_images: 1,
             seed: -1
         }
     };
@@ -266,7 +221,7 @@ export async function generateImage(params: ImageGenerationParams): Promise<Imag
     return {
         id: result.id,
         prompt: result.text,
-        images: result.images,
+        image: result.images[0],
         error: result.error
     };
 }

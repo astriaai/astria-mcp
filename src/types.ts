@@ -65,17 +65,11 @@ export interface ImageGenerationParams {
     prompt: string;
     tune_title?: string;
     aspect_ratio?: 'square' | 'landscape' | 'portrait';
-    num_images?: number;
 }
 
 export interface ImageGenerationResult {
     id: number;
     prompt: string;
-    images: string[];
+    image: string;
     error?: string;
-}
-
-export interface TuneSearchResult {
-    tune: TuneResponse | null;
-    availableTunes: string[];
 }
