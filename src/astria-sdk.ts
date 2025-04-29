@@ -1,5 +1,4 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
-import * as AxiosLogger from 'axios-logger';
 import dotenv from 'dotenv';
 import { TuneResponse, PromptResponse, ImageGenerationParams, ImageGenerationResult } from './types';
 
@@ -35,17 +34,35 @@ const axiosInstance: AxiosInstance = axios.create({
     timeout: CONFIG.API.TIMEOUT_MS,
 });
 
-axiosInstance.interceptors.request.use(AxiosLogger.requestLogger);
+// Interceptors (keep as before)
+axiosInstance.interceptors.request.use(request => {
+    console.error(`-> SDK Request: ${request.method?.toUpperCase()} ${request.url}`);
+    if (request.data) {
+        console.error(`   Request Body Preview: ${JSON.stringify(request.data).substring(0, 200)}...`);
+    }
+    return request;
+});
 
 // Response interceptor - handles error parsing and transformation
 axiosInstance.interceptors.response.use(
-    AxiosLogger.responseLogger,
+    response => {
+        console.error(`<- SDK Response: ${response.config.method?.toUpperCase()} ${response.config.url} Status: ${response.status}`);
+        return response;
+    },
     (error: AxiosError) => {
+
+        console.error(`<- SDK Error: ${error.config?.method?.toUpperCase()} ${error.config?.url} Status: ${error.response?.status}`);
+        if (error.response?.data) {
+            console.error(`   Error Data: ${JSON.stringify(error.response.data)}`);
+        } else {
+            console.error(`   Error Message: ${error.message}`);
+        }
+
         const errorMessage = error.response?.data
             ? (typeof error.response.data === 'string'
                 ? error.response.data
                 : Object.entries(error.response.data as Record<string, any>)
-                    .map(([k, v]) => `${k}: ${String(v)}`)
+                    .map(([key, value]) => `${key}: ${String(value)}`)
                     .join(' '))
             : error.message || 'Unknown error occurred';
 
@@ -174,8 +191,8 @@ export async function generateImage(params: ImageGenerationParams): Promise<Imag
             throw new Error(`${params.tune_title} LoRA not found.`);
         }
 
-        // check if the tune is expired
-        if (!tune.expires_at || new Date(tune.expires_at) > new Date()) {
+        // Check if the tune is expired
+        if (tune.expires_at && new Date(tune.expires_at) < new Date()) {
             throw new Error(`${tune.title} LoRA is expired.`);
         }
 
