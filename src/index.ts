@@ -1,16 +1,18 @@
+#!/usr/bin/env node
 // src/index.ts
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { TextContent, ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
+import { TextContent, ImageContent, ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 // Import functions from the SDK using .js extension for ES Modules
 import {
     createTune,
-    listTunes,
-    retrieveTune, // Added
-    createPrompt,
-    retrievePrompt // Added
-} from "./astria-sdk.js";
+    retrieveTune,
+    retrievePrompt,
+    generateImage,
+    CONFIG
+} from "./astria-sdk";
+import axios from 'axios';
 
 // --- MCP Server Setup ---
 const server = new McpServer({
@@ -22,7 +24,15 @@ const server = new McpServer({
     },
 });
 
-// --- Helper function for parsing IDs ---
+// --- Helper functions ---
+
+/**
+ * Validates and converts string ID parameters to numbers
+ * @param idString - The ID value to parse
+ * @param paramName - Name of the parameter for error messages
+ * @returns Parsed numeric ID
+ * @throws Error if ID is invalid
+ */
 function parseId(idString: unknown, paramName: string): number {
     if (typeof idString !== 'string') {
         throw new Error(`Invalid type for ${paramName}: expected string, got ${typeof idString}`);
@@ -32,6 +42,23 @@ function parseId(idString: unknown, paramName: string): number {
         throw new Error(`Invalid numeric value for ${paramName}: '${idString}'`);
     }
     return id;
+}
+
+/**
+ * Standardizes error handling for MCP tool responses
+ * @param error - The error object to process
+ * @param context - Contextual information about the operation
+ * @returns Formatted MCP error response
+ */
+function handleToolError(error: any, context: string): { isError: true, content: TextContent[] } {
+    const errorMessage = error instanceof z.ZodError
+        ? `Invalid parameters: ${error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`
+        : `Error ${context}: ${error.message}`;
+
+    return {
+        isError: true,
+        content: [{ type: "text", text: errorMessage } as TextContent],
+    };
 }
 
 
@@ -61,8 +88,8 @@ server.resource(
                 }]
             };
         } catch (error: any) {
-            console.error(`MCP Error reading astria_tune resource (${params.tune_id}): ${error.message}`);
-            throw new Error(`Failed to read Astria tune resource: ${error.message}`);
+            // Propagate error from SDK
+            throw error;
         }
     }
 );
@@ -94,8 +121,8 @@ server.resource(
                 }]
             };
         } catch (error: any) {
-            console.error(`MCP Error reading astria_prompt resource (tune=${params.tune_id}, prompt=${params.prompt_id}): ${error.message}`);
-            throw new Error(`Failed to read Astria prompt resource: ${error.message}`);
+            // Propagate error from SDK
+            throw error;
         }
     }
 );
@@ -106,10 +133,8 @@ server.resource(
 // Tool 1: Create Tune
 const CreateTuneRawSchema = {
     title: z.string().describe("Unique title for the tune (e.g., including a UUID)."),
-    name: z.enum(["man", "woman", "cat", "dog", "boy", "girl", "style"]).describe("Class name describing the subject."),
+    name: z.string().describe("Class name describing the subject (e.g., man, woman, cat, dog, boy, girl, baby, style, or any custom class)."),
     image_urls: z.array(z.string().url()).min(4).describe("Array of at least 4 image URLs for training."),
-    callback: z.string().url().optional().describe("Optional webhook URL for when training finishes."),
-    preset: z.enum(["flux-lora-focus", "flux-lora-portrait", "flux-lora-fast"]).optional().default("flux-lora-portrait").describe("Optional Flux training preset."),
     characteristics: z.record(z.string()).optional().describe("Optional key-value pairs for prompt templating (e.g., {\"eye_color\": \"blue eyes\"})."),
 };
 const CreateTuneInputValidator = z.object(CreateTuneRawSchema);
@@ -122,15 +147,18 @@ server.tool(
         try {
             const parsedParams = CreateTuneInputValidator.parse(params);
             console.error(`MCP Tool Call: create_tune`);
+
+            // Set preset automatically based on class name
+            const preset = parsedParams.name === 'boy' || parsedParams.name === 'girl' || parsedParams.name === 'baby' ? 'flux-lora-focus' : parsedParams.name === 'man' || parsedParams.name === 'woman' ? 'flux-lora-portrait' : parsedParams.name === 'style' ? null : 'flux-lora-focus';
+
             const tuneApiData = {
                 tune: {
                     title: parsedParams.title,
                     name: parsedParams.name,
                     image_urls: parsedParams.image_urls,
-                    callback: parsedParams.callback,
-                    base_tune_id: 1504944,
+                    base_tune_id: CONFIG.MODELS.FLUX.ID,
                     model_type: "lora",
-                    preset: parsedParams.preset,
+                    preset,
                     characteristics: parsedParams.characteristics,
                 },
             };
@@ -142,97 +170,63 @@ server.tool(
                 } as TextContent],
             };
         } catch (error: any) {
-            console.error(`MCP Error in create_tune tool: ${error.message}`);
-            const displayMessage = error instanceof z.ZodError
-                ? `Invalid input parameters: ${error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`
-                : `Error creating tune: ${error.message}`;
-            return {
-                isError: true,
-                content: [{ type: "text", text: displayMessage } as TextContent],
-            };
+            return handleToolError(error, 'creating tune');
         }
     }
 );
 
-// Tool 2: List Tunes (Moved back to Tool)
-const ListTunesRawSchema = {
-    offset: z.number().int().min(0).optional().describe("Starting offset for the list (page size is 20). Default 0."),
+// Tool 2: Image Generation
+const ImageRawSchema = {
+    text: z.string().describe("Text description of the desired image"),
+    tune: z.string().optional().describe(`Name of the LoRA tune to apply.`),
+    aspect: z.enum(['square', 'portrait', 'landscape']).optional().default('square').describe("Aspect ratio of the generated image")
 };
-const ListTunesInputValidator = z.object(ListTunesRawSchema);
+const ImageInputValidator = z.object(ImageRawSchema);
 
 server.tool(
-    "list_tunes", // Now a tool again
-    "Lists the user's Astria fine-tunes.",
-    ListTunesRawSchema,
+    "generate_image",
+    "Generate an image with Astria.",
+    ImageRawSchema,
     async (params) => {
         try {
-            const parsedParams = ListTunesInputValidator.parse(params);
-            console.error(`MCP Tool Call: list_tunes with offset=${parsedParams.offset}`);
+            const parsedParams = ImageInputValidator.parse(params);
 
-            // Call the SDK function
-            const result = await listTunes(parsedParams.offset);
+            const imageParams = {
+                prompt: parsedParams.text,
+                tune_title: parsedParams.tune,
+                aspect_ratio: parsedParams.aspect
+            };
+
+            console.error(`MCP Tool Call: image with text=${parsedParams.text}${parsedParams.tune ? `, tune=${parsedParams.tune}` : ''}`);
+
+            const result = await generateImage(imageParams);
+
+            const imageContents = [];
+
+            // Fetch the image
+            const response = await axios.get(result.image, { responseType: 'arraybuffer' });
+
+            // Convert to base64
+            const base64Data = response.data.toString('base64');
+
+            // Add as image content
+            imageContents.push({
+                type: "image",
+                data: base64Data,
+                mimeType: "image/jpeg",
+            } as ImageContent);
+
+            // Add the direct URL as text for easy access
+            imageContents.push({
+                type: "text",
+                text: `Generated image URL: ${result.image}`,
+            } as TextContent);
 
             return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify(result, null, 2),
-                } as TextContent],
+                content: imageContents,
             };
         } catch (error: any) {
-            console.error(`MCP Error in list_tunes tool: ${error.message}`);
-            const displayMessage = error instanceof z.ZodError
-                ? `Invalid input parameters: ${error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`
-                : `Error listing tunes: ${error.message}`;
-            return {
-                isError: true,
-                content: [{ type: "text", text: displayMessage } as TextContent],
-            };
-        }
-    }
-);
-
-
-// Tool 3: Create Prompt (Simplified)
-const CreatePromptRawSchemaSimplified = {
-    lora_tune_id: z.number().int().positive().describe("The ID of the *user's* trained LoRA fine-tune."),
-    text: z.string().describe("Text description for the image generation (excluding LoRA tag)."),
-};
-const CreatePromptInputValidatorSimplified = z.object(CreatePromptRawSchemaSimplified);
-
-server.tool(
-    "create_prompt",
-    "Creates a new Astria prompt using a user's LoRA on the Flux base model with default settings (super-resolution, face-inpainting).",
-    CreatePromptRawSchemaSimplified,
-    async (params) => {
-        try {
-            const parsedParams = CreatePromptInputValidatorSimplified.parse(params);
-            console.error(`MCP Tool Call: create_prompt (simplified) for lora_tune_id=${parsedParams.lora_tune_id}`);
-
-            const fullPromptText = `<lora:${parsedParams.lora_tune_id}:1.0> ${parsedParams.text}`;
-            const promptApiData = {
-                prompt: {
-                    text: fullPromptText,
-                    super_resolution: true,
-                    inpaint_faces: true,
-                    // Optional params commented out
-                },
-            };
-            const result = await createPrompt(promptApiData);
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify(result, null, 2),
-                } as TextContent],
-            };
-        } catch (error: any) {
-            console.error(`MCP Error in create_prompt tool: ${error.message}`);
-            const displayMessage = error instanceof z.ZodError
-                ? `Invalid input parameters: ${error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`
-                : `Error creating prompt: ${error.message}`;
-            return {
-                isError: true,
-                content: [{ type: "text", text: displayMessage } as TextContent],
-            };
+            return handleToolError(error, 'generating image');
         }
     }
 );

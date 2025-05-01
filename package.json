@@ -1,20 +1,29 @@
 {
   "name": "astria-mcp-server",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "MCP server for Astria AI image generation and fine-tuning",
+  "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
+    "prepublishOnly": "npm run build",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "mcp",
+    "astria",
+    "ai",
+    "image-generation",
+    "fine-tuning",
+    "model-context-protocol"
+  ],
+  "author": "Astria Inc.",
+  "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.8.0",
     "axios": "^1.8.4",
+    "axios-logger": "^2.8.1",
     "dotenv": "^16.4.7",
     "zod": "^3.24.2"
   },
@@ -22,5 +31,36 @@
     "@types/node": "^22.13.14",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.2"
-  }
+  },
+  "mcp": {
+    "type": "server",
+    "displayName": "Astria MCP Server",
+    "description": "Generate and fine-tune images with Astria AI",
+    "category": "image-generation",
+    "env": {
+      "ASTRIA_API_KEY": {
+        "description": "Your Astria API key from https://www.astria.ai/users/edit#api",
+        "required": true
+      }
+    }
+  },
+  "bin": {
+    "astria-mcp-server": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/astriaai/astria-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/astriaai/astria-mcp/issues"
+  },
+  "homepage": "https://github.com/astriaai/astria-mcp#readme"
 }
